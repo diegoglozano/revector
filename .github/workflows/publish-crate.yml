@@ -1,0 +1,44 @@
+name: Publish to crates.io
+
+# Publishes the crate on the same version tags cargo-dist's release workflow
+# uses (e.g. `v0.1.0`). This is independent of cargo-dist, which only ships
+# prebuilt binaries to GitHub Releases — crates.io is a separate channel that
+# enables `cargo install revector`.
+#
+# Requires a `CARGO_REGISTRY_TOKEN` repository secret (a crates.io API token).
+
+on:
+  push:
+    tags:
+      - '**[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: cargo publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify the tag matches the crate version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          echo "tag=$tag crate=$crate"
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::git tag ($tag) does not match Cargo.toml version ($crate)"
+            exit 1
+          fi
+
+      - name: Publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

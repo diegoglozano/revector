@@ -51,3 +51,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "ti
 strip = true
 lto = "thin"
 codegen-units = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
