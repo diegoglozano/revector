@@ -1,0 +1,29 @@
+revision: "0002_index_and_quantize"
+down_revision: "0001_create_products"
+description: index the category field and enable scalar quantization
+
+up:
+  - op: create_payload_index
+    collection: products
+    field_name: category
+    schema: keyword
+
+  - op: update_collection
+    collection: products
+    quantization_config:
+      scalar:
+        type: int8
+        quantile: 0.99
+        always_ram: true
+
+# `update_collection` can't be auto-reversed (the prior config isn't recorded),
+# so we declare the downgrade explicitly: drop the index and disable quantization.
+down:
+  - op: update_collection
+    collection: products
+    quantization_config: disabled
+
+  - op: delete_payload_index
+    collection: products
+    field_name: category
+    schema: keyword

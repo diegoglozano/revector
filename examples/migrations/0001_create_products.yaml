@@ -1,0 +1,20 @@
+revision: "0001_create_products"
+down_revision: null
+description: create the products collection with a default text vector
+
+up:
+  - op: create_collection
+    name: products
+    spec:
+      vectors:
+        "":
+          size: 768
+          distance: Cosine
+      hnsw_config:
+        m: 16
+        ef_construct: 128
+      optimizers_config:
+        default_segment_number: 2
+
+# No explicit `down` — revector auto-inverts `create_collection` to
+# `delete_collection` on downgrade.
