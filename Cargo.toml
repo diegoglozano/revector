@@ -1,0 +1,53 @@
+[package]
+name = "revector"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Declarative, versioned schema & config migrations for Qdrant — Alembic for vector collections."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/diegoglozano/revector"
+homepage = "https://github.com/diegoglozano/revector"
+documentation = "https://docs.rs/revector"
+readme = "README.md"
+keywords = ["qdrant", "migration", "schema", "vector", "database"]
+categories = ["command-line-utilities", "database"]
+exclude = [".github/", "docs/", "tests/", "migrations/"]
+
+# The library carries all the logic; the binary is a thin CLI shell over it.
+[lib]
+name = "revector"
+path = "src/lib.rs"
+
+[[bin]]
+name = "revector"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+figment = { version = "0.10", features = ["toml", "env"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
+qdrant-client = "1.18"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2 = "0.10"
+hex = "0.4"
+time = { version = "0.3", features = ["formatting", "macros", "serde-well-known"] }
+uuid = { version = "1", features = ["v5"] }
+walkdir = "2"
+indexmap = { version = "2", features = ["serde"] }
+
+[dev-dependencies]
+testcontainers = "0.23"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time"] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

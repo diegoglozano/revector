@@ -1,0 +1,23 @@
+revision: "0003_add_image_vector"
+down_revision: "0002_index_and_quantize"
+description: add a named image vector and (re)embed it via an exec-hook
+
+up:
+  - op: create_vector
+    collection: products
+    name: image
+    spec:
+      size: 512
+      distance: Dot
+
+  - op: exec
+    name: embed product images
+    command: "echo 'plug in your embedding script here, e.g. python scripts/embed_images.py'"
+
+# `create_vector` auto-inverts to `delete_vector`, but the exec step has no
+# automatic inverse, so we spell out the downgrade. Dropping the vector discards
+# the embeddings — a deliberate, declared choice.
+down:
+  - op: delete_vector
+    collection: products
+    name: image
