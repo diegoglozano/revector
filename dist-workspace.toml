@@ -17,12 +17,8 @@ install-path = "CARGO_HOME"
 hosting = "github"
 # Whether to install an updater program
 install-updater = false
-
-# --- Homebrew auto-publish (not yet enabled) ---------------------------------
-# The Homebrew formula is generated and attached to each GitHub Release today.
-# To make `brew install diegoglozano/tap/revector` work, create a public
-# `diegoglozano/homebrew-tap` repo + a `HOMEBREW_TAP_TOKEN` repo secret (a PAT
-# with `contents:write` on the tap), then uncomment:
-# tap = "diegoglozano/homebrew-tap"
-# publish-jobs = ["homebrew"]
+# Publish the generated Homebrew formula to the tap on each release.
+# Requires a `HOMEBREW_TAP_TOKEN` repo secret (PAT with contents:write on the tap).
+tap = "diegoglozano/homebrew-tap"
+publish-jobs = ["homebrew"]
 
