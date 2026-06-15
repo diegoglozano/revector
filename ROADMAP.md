@@ -11,8 +11,11 @@ section.
   repo and a `HOMEBREW_TAP_TOKEN` secret (PAT with `contents:write` on the tap),
   then uncomment `tap` + `publish-jobs` in `dist-workspace.toml`. Enables
   `brew install diegoglozano/tap/revector`.
-- [ ] **crates.io** — reserve the `revector` name and publish (`cargo publish`),
-  ideally automated with `cargo-release`. Enables `cargo install revector`.
+- [ ] **crates.io** — `.github/workflows/publish-crate.yml` runs `cargo publish`
+  on version tags (verified the package builds via `cargo publish --dry-run`).
+  The name `revector` is currently free. To activate: add a `CARGO_REGISTRY_TOKEN`
+  repo secret (crates.io API token), then push a `v0.1.0` tag — the first publish
+  claims the name. Enables `cargo install revector`.
 - [ ] **PyPI via maturin (for `uvx` / `pipx` / `pip`)** — package the binary
   crate into platform wheels with `maturin` (no PyO3 bindings needed; same
   pattern Astral uses for `ruff`). Add a `maturin publish` CI job gated on tags.
