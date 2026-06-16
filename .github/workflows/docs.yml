@@ -47,9 +47,13 @@ jobs:
 
       # Auto-enable GitHub Pages (Source: GitHub Actions) on first run; sets
       # the base path so relative URLs resolve correctly under /<repo>/.
+      # `enablement: true` flips Pages on via the API if it isn't already —
+      # the default `false` only verifies it's enabled and errors otherwise.
       - name: Configure Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Build
         run: mdbook build docs
