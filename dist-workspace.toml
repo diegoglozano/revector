@@ -21,4 +21,5 @@ install-updater = false
 # Requires a `HOMEBREW_TAP_TOKEN` repo secret (PAT with contents:write on the tap).
 tap = "diegoglozano/homebrew-tap"
 publish-jobs = ["homebrew"]
-
+# Generate SLSA build-provenance attestations for released artifacts.
+github-attestations = true

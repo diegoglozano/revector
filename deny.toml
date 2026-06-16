@@ -1,0 +1,48 @@
+# cargo-deny configuration — supply-chain checks run in CI.
+# See https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+version = 2
+# Fail on security vulnerabilities. Only check the *workspace's* own crates for
+# "unmaintained" status — we can't control transitive crates (e.g. rustls-pemfile
+# pulled in by qdrant-client/tonic), and flagging those just creates noise.
+unmaintained = "workspace"
+ignore = [
+    # tokio-tar (CVE-2025-62518): a *dev-dependency only*, pulled in by
+    # testcontainers for integration tests. It is never compiled into the
+    # released binary or a `cargo install`. Revisit when testcontainers ships a
+    # release that drops/patches tokio-tar.
+    { id = "RUSTSEC-2025-0111", reason = "dev-dependency only (testcontainers); not in any shipped artifact" },
+]
+
+[bans]
+# Surface accidental dependency bloat / duplicate versions without failing CI.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[licenses]
+version = 2
+# Permissive licenses compatible with revector's MIT OR Apache-2.0 license.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    # Mozilla CA root store bundled by webpki-roots (a permissive data license).
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+[sources]
+# Only allow dependencies from crates.io — no unknown registries or git sources,
+# which is a common supply-chain attack vector.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
