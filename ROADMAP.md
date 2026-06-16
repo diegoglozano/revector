@@ -7,15 +7,10 @@ section.
 
 - [x] **cargo-dist** — prebuilt binaries + shell/PowerShell installers + a
   Homebrew formula, released on tag push (`.github/workflows/release.yml`).
-- [ ] **Homebrew auto-publish** — create a public `diegoglozano/homebrew-tap`
-  repo and a `HOMEBREW_TAP_TOKEN` secret (PAT with `contents:write` on the tap),
-  then uncomment `tap` + `publish-jobs` in `dist-workspace.toml`. Enables
-  `brew install diegoglozano/tap/revector`.
-- [ ] **crates.io** — `.github/workflows/publish-crate.yml` runs `cargo publish`
-  on version tags (verified the package builds via `cargo publish --dry-run`).
-  The name `revector` is currently free. To activate: add a `CARGO_REGISTRY_TOKEN`
-  repo secret (crates.io API token), then push a `v0.1.0` tag — the first publish
-  claims the name. Enables `cargo install revector`.
+- [x] **crates.io** — `cargo install revector` (published `v0.1.0`; auto-publishes
+  on version tags via `.github/workflows/publish-crate.yml`).
+- [x] **Homebrew** — `brew install diegoglozano/tap/revector` (formula auto-pushed
+  to the tap on release).
 - [ ] **PyPI via maturin (for `uvx` / `pipx` / `pip`)** — package the binary
   crate into platform wheels with `maturin` (no PyO3 bindings needed; same
   pattern Astral uses for `ruff`). Add a `maturin publish` CI job gated on tags.
@@ -39,8 +34,65 @@ section.
 - [ ] More live integration coverage: irreversible-downgrade refusal and the
   checksum-mismatch guard (both have unit coverage today).
 
-## v2
+## Qdrant coverage gaps
+
+The automatable surface we haven't exposed as ops yet:
+
+- [ ] **`update_collection` params patch** — replication_factor,
+  write_consistency_factor, on_disk_payload (the `collection_params_diff` helper
+  exists but isn't wired into `UpdateCollectionOp`).
+- [ ] **`strict_mode_config`** and collection **`metadata`** — both listed in the
+  capability matrix; `update_collection` supports them.
+- [ ] **Payload index params** — `create_payload_index` only takes a schema type;
+  expose `is_tenant`, `on_disk`, `is_principal`, text tokenizer, etc. (key for
+  the multitenancy / tenant-isolation skill).
+- [ ] **Sharding-key** create/delete operations.
+
+## Operational / UX (table-stakes for a migration tool)
+
+- [ ] **`stamp` / `baseline`** — mark the DB as already at revision X without
+  running it (Alembic `stamp`), so revector can adopt an existing collection
+  without re-creating it. Currently missing and blocks brownfield adoption.
+- [ ] **`validate` / lint** — parse all migrations + resolve the chain with no DB
+  connection (great as a CI/pre-commit check).
+- [ ] **Advisory locking** — prevent two concurrent `up` runs (e.g. parallel CI)
+  from racing; store a lock record in the tracking collection.
+- [ ] **Confirmations + `--yes`** — prompt before irreversible/destructive ops
+  unless `--yes`; today `up`/`down` act immediately.
+- [ ] **`--json` output** on `status` / `up` / `down` / `diff` for CI consumption.
+
+## Ecosystem & docs
+
+- [ ] **mdBook documentation site.**
+- [ ] **Align with / publish a Qdrant "skill"** — Qdrant Skills
+  (https://skills.qdrant.tech, https://github.com/qdrant/skills) are agent-facing
+  "when/why" decision trees; their topics include **model migration** and
+  **version upgrades**, which is exactly revector's lane. Worth: (a) authoring a
+  `revector` skill so agents reach for it during schema/model migrations, and
+  (b) making the re-embedding/add-vector→drop-vector flow a first-class,
+  documented "model migration" recipe.
+
+## Multi-backend support (v2/v3)
+
+Generalize beyond Qdrant to other open-source vector DBs. The architecture is
+already half-prepared: the declarative `spec`/`ops` layer is decoupled from the
+client (all Qdrant calls live in `convert.rs` + `executor.rs`).
+
+- [ ] Introduce a `Backend` trait (create/delete collection, create/delete index,
+  add/drop vector, config patch, alias ops, tracking-store read/write) and move
+  the Qdrant implementation behind it.
+- [ ] Per-backend capability flags — each engine supports a different in-place
+  surface; `diff`/`up` must degrade gracefully and reject unsupported ops with a
+  clear error.
+- [ ] Candidate backends (rough order of fit): **pgvector** (DDL maps cleanly to
+  SQL, huge audience), **Milvus**, **Weaviate**, **LanceDB**, **Chroma**.
+  Pinecone is managed/closed, so lower priority.
+- [ ] Decide tracking-store strategy per backend (in-DB collection vs. a sidecar
+  table) and keep the revision-chain/checksum logic backend-agnostic.
+- Open question: does multi-backend dilute the "Alembic for Qdrant" focus? Lean
+  toward making Qdrant feature-complete first, then abstract.
+
+## v2 (engine-level)
 
 - [ ] Branching/merging revision graphs (v1 enforces a single linear chain).
 - [ ] PyO3 / uniffi bindings (deferred — low payoff for a network-I/O workload).
-- [ ] mdBook documentation site.
