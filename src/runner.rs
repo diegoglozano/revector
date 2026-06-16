@@ -59,6 +59,15 @@ pub struct Runner<'a> {
     tracker: Tracker<'a>,
     project_root: PathBuf,
     dry_run: bool,
+    force: bool,
+    holder: String,
+}
+
+/// Identify this run for the advisory lock: `user@host pid:N`.
+fn default_holder() -> String {
+    let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+    let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
+    format!("{user}@{host} pid:{}", std::process::id())
 }
 
 impl<'a> Runner<'a> {
@@ -74,12 +83,43 @@ impl<'a> Runner<'a> {
             tracker: Tracker::new(client, tracking_collection),
             project_root: project_root.into(),
             dry_run: false,
+            force: false,
+            holder: default_holder(),
         }
     }
 
     pub fn dry_run(mut self, on: bool) -> Self {
         self.dry_run = on;
         self
+    }
+
+    /// Override a held/stale advisory lock instead of failing.
+    pub fn force(mut self, on: bool) -> Self {
+        self.force = on;
+        self
+    }
+
+    /// Acquire the advisory lock, run `op`, then release the lock regardless of
+    /// outcome. Dry runs don't lock (they mutate nothing).
+    async fn with_lock<T, F, Fut>(&self, op: F) -> Result<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        if self.dry_run {
+            return op().await;
+        }
+        self.tracker.ensure().await?;
+        self.tracker.acquire_lock(&self.holder, self.force).await?;
+        let result = op().await;
+        if let Err(e) = self.tracker.release_lock().await {
+            // Don't mask the real error if the operation itself failed.
+            if result.is_ok() {
+                return Err(e);
+            }
+            warn!("failed to release migration lock: {e}");
+        }
+        result
     }
 
     fn executor(&self) -> Executor<'a> {
@@ -161,8 +201,13 @@ impl<'a> Runner<'a> {
         Ok(())
     }
 
-    /// Apply pending migrations up to `target` (default: chain head).
+    /// Apply pending migrations up to `target` (default: chain head), holding
+    /// the advisory lock for the duration.
     pub async fn up(&self, target: Option<&str>) -> Result<Applied> {
+        self.with_lock(|| self.up_locked(target)).await
+    }
+
+    async fn up_locked(&self, target: Option<&str>) -> Result<Applied> {
         self.tracker.ensure().await?;
         self.verify_checksums().await?;
 
@@ -217,8 +262,13 @@ impl<'a> Runner<'a> {
     }
 
     /// Roll back applied migrations down to `target` (exclusive). When `target`
-    /// is `None`, roll back `steps` revisions from the current head.
+    /// is `None`, roll back `steps` revisions from the current head. Holds the
+    /// advisory lock for the duration.
     pub async fn down(&self, target: Option<&str>, steps: usize) -> Result<Applied> {
+        self.with_lock(|| self.down_locked(target, steps)).await
+    }
+
+    async fn down_locked(&self, target: Option<&str>, steps: usize) -> Result<Applied> {
         self.tracker.ensure().await?;
         self.verify_checksums().await?;
 
@@ -272,6 +322,30 @@ impl<'a> Runner<'a> {
         })
     }
 
+    /// Compute, without executing or locking, which revisions a `down` would
+    /// roll back (highest first). Used to preview a confirmation prompt.
+    pub async fn plan_down(&self, target: Option<&str>, steps: usize) -> Result<Vec<String>> {
+        let current = match self.current_position().await? {
+            Some(c) => c,
+            None => return Ok(vec![]),
+        };
+        let floor: isize = match target {
+            Some(rev) => self
+                .chain
+                .position(rev)
+                .ok_or_else(|| Error::UnknownRevision(rev.to_string()))?
+                as isize,
+            None => current as isize - steps as isize,
+        };
+        let mut planned = Vec::new();
+        let mut pos = current as isize;
+        while pos > floor {
+            planned.push(self.chain.migrations()[pos as usize].revision().to_string());
+            pos -= 1;
+        }
+        Ok(planned)
+    }
+
     /// Migrate to an exact revision, choosing up or down automatically.
     pub async fn to(&self, target: &str) -> Result<Applied> {
         let target_pos = self
@@ -299,6 +373,10 @@ impl<'a> Runner<'a> {
     /// tip) and `base` (mark nothing applied). This is how an existing,
     /// hand-built collection is adopted without re-creating it.
     pub async fn stamp(&self, target: &str) -> Result<Stamped> {
+        self.with_lock(|| self.stamp_locked(target)).await
+    }
+
+    async fn stamp_locked(&self, target: &str) -> Result<Stamped> {
         self.tracker.ensure().await?;
 
         // Resolve target to a chain position; `base` is -1 (nothing applied).

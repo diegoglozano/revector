@@ -28,6 +28,14 @@ pub struct Cli {
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
+    /// Skip confirmation prompts for destructive operations (rollbacks).
+    #[arg(short = 'y', long, global = true)]
+    pub yes: bool,
+
+    /// Override a held or stale migration lock instead of failing.
+    #[arg(long, global = true)]
+    pub force: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
