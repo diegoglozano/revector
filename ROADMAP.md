@@ -62,6 +62,19 @@ The automatable surface we haven't exposed as ops yet:
   skips, and a non-interactive shell refuses without it.
 - [ ] **`--json` output** on `status` / `up` / `down` / `diff` for CI consumption.
 
+## Security / supply chain
+
+- [x] **`cargo-deny` in CI** — advisories, licenses, bans, sources
+  (`deny.toml` + `.github/workflows/security.yml`), plus a weekly scheduled run.
+- [x] **Dependabot** — weekly Rust + GitHub Actions update PRs.
+- [x] **Build-provenance attestations** — `github-attestations = true` in
+  cargo-dist; release artifacts are verifiable with `gh attestation verify`.
+- [x] **Least-privilege CI** — `permissions: contents: read` on the CI workflow.
+- [ ] **Pin GitHub Actions to commit SHAs** (OpenSSF hardening) — currently
+  tag-pinned + Dependabot-managed; SHA-pinning is stricter.
+- [ ] **Drop the dev-only `tokio-tar` advisory** once `testcontainers` ships a
+  release that patches/replaces it (then remove the `deny.toml` ignore).
+
 ## Ecosystem & docs
 
 - [ ] **mdBook documentation site.**

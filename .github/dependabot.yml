@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Rust dependencies — picks up security patches and keeps Cargo.lock current.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # Batch routine bumps into one PR to cut noise; security updates still
+      # come through promptly.
+      cargo-minor:
+        update-types: ["minor", "patch"]
+
+  # Keep GitHub Actions pinned versions current (and patched).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
