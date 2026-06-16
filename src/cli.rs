@@ -78,6 +78,24 @@ pub enum Command {
         dry_run: bool,
     },
 
+    /// Validate migrations offline: parse every file and resolve the revision
+    /// chain without connecting to Qdrant. Useful as a CI / pre-commit check.
+    Validate,
+
+    /// Mark the database as being at a revision **without running** any
+    /// operations — for adopting an existing collection (Alembic's `stamp`).
+    ///
+    /// Records every revision up to and including the target as applied, and
+    /// removes any recorded revisions above it. Accepts a revision id, or the
+    /// special values `head` and `base`.
+    Stamp {
+        /// Target revision id (or `head` / `base`).
+        revision: String,
+        /// Print what would change without writing to Qdrant.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Compare a declared collection spec against the live collection.
     Diff {
         /// Collection name to inspect.

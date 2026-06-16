@@ -50,10 +50,10 @@ The automatable surface we haven't exposed as ops yet:
 
 ## Operational / UX (table-stakes for a migration tool)
 
-- [ ] **`stamp` / `baseline`** — mark the DB as already at revision X without
+- [x] **`stamp` / `baseline`** — mark the DB as already at revision X without
   running it (Alembic `stamp`), so revector can adopt an existing collection
-  without re-creating it. Currently missing and blocks brownfield adoption.
-- [ ] **`validate` / lint** — parse all migrations + resolve the chain with no DB
+  without re-creating it. Supports a revision id plus `head` / `base`.
+- [x] **`validate` / lint** — parse all migrations + resolve the chain with no DB
   connection (great as a CI/pre-commit check).
 - [ ] **Advisory locking** — prevent two concurrent `up` runs (e.g. parallel CI)
   from racing; store a lock record in the tracking collection.
