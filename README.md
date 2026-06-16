@@ -145,9 +145,23 @@ When an operation isn't auto-reversible, supply an explicit `down:` block — th
 | `revector up [--to <rev>] [--dry-run]` | Apply pending migrations. |
 | `revector down [--to <rev>] [--steps N] [--dry-run]` | Roll back migrations. |
 | `revector to <rev> [--dry-run]` | Migrate to an exact revision (up or down). |
+| `revector validate` | Parse all migrations and resolve the chain offline — no Qdrant connection. Good as a CI / pre-commit check. |
+| `revector stamp <rev\|head\|base> [--dry-run]` | Mark the DB as being at a revision **without running** any ops — for adopting an existing collection (Alembic's `stamp`). |
 | `revector diff <collection> --spec <file.yaml>` | Compare a declared collection spec against the live collection. |
 
 `--dry-run` prints the plan without touching Qdrant.
+
+### Adopting an existing collection
+
+If you already have a collection that matches an early migration, `stamp` lets
+revector take over without re-creating it:
+
+```sh
+# Tell revector the DB is already at 0002 (no operations run)
+revector stamp 0002_index_and_quantize
+# Now apply everything after it normally
+revector up
+```
 
 ## Configuration
 

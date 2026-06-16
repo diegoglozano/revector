@@ -44,6 +44,15 @@ pub struct Applied {
     pub dry_run: bool,
 }
 
+/// Outcome of a `stamp`: which revisions were newly marked applied and which
+/// were removed from the applied set, without running any operations.
+#[derive(Debug, Clone)]
+pub struct Stamped {
+    pub marked: Vec<String>,
+    pub removed: Vec<String>,
+    pub dry_run: bool,
+}
+
 pub struct Runner<'a> {
     client: &'a Qdrant,
     chain: &'a Chain,
@@ -280,6 +289,57 @@ impl<'a> Runner<'a> {
             }
             _ => self.up(Some(target)).await,
         }
+    }
+
+    /// Mark the database as being at `target` **without running** any
+    /// operations (Alembic's `stamp`). Records every revision up to and
+    /// including the target as applied and removes any recorded above it.
+    ///
+    /// `target` accepts a revision id, or the special tokens `head` (the chain
+    /// tip) and `base` (mark nothing applied). This is how an existing,
+    /// hand-built collection is adopted without re-creating it.
+    pub async fn stamp(&self, target: &str) -> Result<Stamped> {
+        self.tracker.ensure().await?;
+
+        // Resolve target to a chain position; `base` is -1 (nothing applied).
+        let target_pos: isize = match target {
+            "base" => -1,
+            "head" => self.chain.len() as isize - 1,
+            rev => self
+                .chain
+                .position(rev)
+                .ok_or_else(|| Error::UnknownRevision(rev.to_string()))?
+                as isize,
+        };
+
+        let applied = self.tracker.applied().await?;
+        let mut marked = Vec::new();
+        let mut removed = Vec::new();
+
+        for (i, m) in self.chain.migrations().iter().enumerate() {
+            let is_applied = applied.contains_key(m.revision());
+            if (i as isize) <= target_pos {
+                if !is_applied {
+                    info!("stamping {} as applied", m.revision());
+                    if !self.dry_run {
+                        self.tracker.record(m).await?;
+                    }
+                    marked.push(m.revision().to_string());
+                }
+            } else if is_applied {
+                info!("clearing applied mark for {}", m.revision());
+                if !self.dry_run {
+                    self.tracker.remove(m.revision()).await?;
+                }
+                removed.push(m.revision().to_string());
+            }
+        }
+
+        Ok(Stamped {
+            marked,
+            removed,
+            dry_run: self.dry_run,
+        })
     }
 
     /// Warn about orphaned applied revisions (helpful before any operation).

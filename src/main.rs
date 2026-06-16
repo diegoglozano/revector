@@ -15,7 +15,7 @@ use revector::chain::Chain;
 use revector::cli::{Cli, Command};
 use revector::config::Config;
 use revector::migration::discover;
-use revector::runner::{Runner, StatusReport};
+use revector::runner::{Runner, Stamped, StatusReport};
 use revector::spec::CollectionSpec;
 use revector::{client, diff, scaffold};
 
@@ -89,6 +89,15 @@ async fn run(cli: Cli) -> revector::Result<()> {
             println!("created {}", path.display());
             return Ok(());
         }
+        Command::Validate => {
+            let config = resolve_config(&cli)?;
+            let migrations = discover(&config.migrations_dir)?;
+            let count = migrations.len();
+            // Chain::resolve surfaces any structural error (cycle, branch, …).
+            let chain = Chain::resolve(migrations)?;
+            print_validation(&chain, count);
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -140,8 +149,16 @@ async fn run(cli: Cli) -> revector::Result<()> {
             let applied = runner.to(&revision).await?;
             print_applied("Migrated", &applied.revisions, applied.dry_run);
         }
-        // Handled above.
-        Command::Init | Command::New { .. } | Command::Diff { .. } => unreachable!(),
+        Command::Stamp { revision, dry_run } => {
+            let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, &project_root)
+                .dry_run(dry_run);
+            let stamped = runner.stamp(&revision).await?;
+            print_stamped(&stamped);
+        }
+        // Handled above (no live connection needed).
+        Command::Init | Command::New { .. } | Command::Validate | Command::Diff { .. } => {
+            unreachable!()
+        }
     }
 
     Ok(())
@@ -199,6 +216,52 @@ fn print_applied(verb: &str, revisions: &[String], dry_run: bool) {
     println!("{prefix}{verb} {} revision(s):", revisions.len());
     for r in revisions {
         println!("  - {r}");
+    }
+}
+
+fn print_validation(chain: &Chain, count: usize) {
+    if count == 0 {
+        println!("No migrations found — nothing to validate.");
+        return;
+    }
+    let base = chain.migrations().first().map(|m| m.revision());
+    println!("✔ {count} migration(s) form a valid linear chain");
+    println!("  base: {}", base.unwrap_or("(none)"));
+    println!("  head: {}", chain.head().unwrap_or("(none)"));
+    for m in chain.migrations() {
+        let reversibility = if m.is_reversible() {
+            "reversible"
+        } else {
+            "irreversible (no auto-inverse; needs explicit `down`)"
+        };
+        println!(
+            "  • {}  {}  [{reversibility}]",
+            m.revision(),
+            m.file.description.as_deref().unwrap_or("")
+        );
+    }
+}
+
+fn print_stamped(stamped: &Stamped) {
+    let prefix = if stamped.dry_run { "[dry-run] " } else { "" };
+    if stamped.marked.is_empty() && stamped.removed.is_empty() {
+        println!("{prefix}Already at the requested revision — nothing to stamp.");
+        return;
+    }
+    if !stamped.marked.is_empty() {
+        println!(
+            "{prefix}Marked {} revision(s) as applied:",
+            stamped.marked.len()
+        );
+        for r in &stamped.marked {
+            println!("  + {r}");
+        }
+    }
+    if !stamped.removed.is_empty() {
+        println!("{prefix}Cleared {} applied mark(s):", stamped.removed.len());
+        for r in &stamped.removed {
+            println!("  - {r}");
+        }
     }
 }
 

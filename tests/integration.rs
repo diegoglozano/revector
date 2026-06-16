@@ -296,3 +296,36 @@ vectors:
     assert!(!report.in_sync());
     assert!(report.differences.iter().any(|d| d.path.contains("size")));
 }
+
+#[tokio::test]
+async fn stamp_marks_revisions_without_running_ops() {
+    let (_c, config, _lock) = boot_or_skip!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_1), ("0002.yaml", MIG_2)]);
+
+    let qdrant = client::connect(&config).unwrap();
+    cleanup(&qdrant, &["products"]).await;
+    let chain = resolve_chain(dir);
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+
+    // Stamp to head: marks both revisions applied but runs no operations.
+    let stamped = runner.stamp("head").await.unwrap();
+    assert_eq!(stamped.marked, vec!["0001_products", "0002_index"]);
+    assert!(stamped.removed.is_empty());
+
+    // The collection was never created — stamp adopts state, it doesn't apply.
+    assert!(!qdrant.collection_exists("products").await.unwrap());
+
+    let report = runner.status().await.unwrap();
+    assert_eq!(report.current.as_deref(), Some("0002_index"));
+
+    // Re-stamping head is a no-op.
+    let again = runner.stamp("head").await.unwrap();
+    assert!(again.marked.is_empty() && again.removed.is_empty());
+
+    // Stamp base clears all applied marks.
+    let cleared = runner.stamp("base").await.unwrap();
+    assert_eq!(cleared.removed.len(), 2);
+    assert_eq!(runner.status().await.unwrap().current, None);
+}
