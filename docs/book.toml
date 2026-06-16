@@ -1,0 +1,26 @@
+# mdBook configuration for the revector documentation site.
+# Build:  mdbook build docs
+# Serve:  mdbook serve docs --open
+
+[book]
+title = "revector"
+description = "Declarative, versioned schema & config migrations for Qdrant — Alembic for vector collections."
+authors = ["revector contributors"]
+language = "en"
+multilingual = false
+src = "src"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/diegoglozano/revector"
+git-repository-icon = "fa-github"
+edit-url-template = "https://github.com/diegoglozano/revector/edit/main/docs/{path}"
+site-url = "/revector/"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.playground]
+runnable = false

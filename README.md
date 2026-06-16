@@ -3,6 +3,7 @@
 **Declarative, versioned schema & config migrations for [Qdrant](https://qdrant.tech) — Alembic for vector collections.**
 
 [![CI](https://github.com/diegoglozano/revector/actions/workflows/ci.yml/badge.svg)](https://github.com/diegoglozano/revector/actions/workflows/ci.yml)
+[![Docs](https://github.com/diegoglozano/revector/actions/workflows/docs.yml/badge.svg)](https://diegoglozano.github.io/revector/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 revector brings ordered, reversible, database-tracked migrations to Qdrant —
@@ -15,24 +16,12 @@ them back with a single static binary. No Python venv, no external state store.
 > Moving *points* between instances is a solved problem (see
 > [`qdrant/migration`](https://github.com/qdrant/migration)); that's explicitly
 > out of scope. The one data operation revector *does* help with — re-embedding
-> — is handled through an [exec-hook](#re-embedding-the-exec-hook).
+> — is handled through an
+> [exec-hook](https://diegoglozano.github.io/revector/guides/re-embedding.html).
+
+📖 **Full docs:** <https://diegoglozano.github.io/revector/>
 
 ---
-
-## Why
-
-Qdrant collections drift. You tune `hnsw_config`, add a payload index, introduce
-a second named vector for a new model, flip quantization on. Today those changes
-live in ad-hoc scripts or a teammate's shell history. revector makes them:
-
-- **Versioned** — each change is a file with a `revision` and `down_revision`,
-  forming an ordered chain (Alembic's model).
-- **Tracked** — applied revisions are recorded *inside Qdrant itself*, in a
-  dedicated `_revector_migrations` collection. No external database.
-- **Reversible (honestly)** — downgrades are auto-derived where safe and
-  **refused loudly** where they'd lose data, instead of pretending.
-- **Idempotent & resumable** — Qdrant has no transactional DDL and builds
-  indexes asynchronously, so every step is safe to re-run after a failure.
 
 ## Install
 
@@ -119,21 +108,23 @@ down:
 
 | `op:` | Effect | Auto-reversible? |
 |-------|--------|------------------|
-| `create_collection` | Create a collection from a full spec | ✔ → `delete_collection` |
-| `delete_collection` | Drop a collection | ✘ (data loss) |
-| `update_collection` | Patch `hnsw_config`, `quantization_config`, `optimizers_config`, or per-vector params in place | ✘ (prior state unknown) |
-| `create_vector` | Add a named dense vector (v1.18+) | ✔ → `delete_vector` |
-| `create_sparse_vector` | Add a named sparse vector | ✔ → `delete_vector` |
-| `delete_vector` | Drop a named vector | ✘ (data loss) |
-| `create_payload_index` | Index a payload field | ✔ → `delete_payload_index` |
-| `delete_payload_index` | Remove a payload index | ✔ iff `schema:` is given |
-| `create_alias` | Point an alias at a collection | ✔ → `delete_alias` |
-| `delete_alias` | Remove an alias | ✘ (target unknown) |
-| `switch_alias` | Atomically repoint an alias (zero-downtime swap) | ✘ (prior target unknown) |
-| `exec` | Run a shell command (the re-embedding escape hatch) | ✘ unless `down` provided |
+| [`create_collection`](https://diegoglozano.github.io/revector/reference/operations/create_collection.html) | Create a collection from a full spec | ✔ → `delete_collection` |
+| [`delete_collection`](https://diegoglozano.github.io/revector/reference/operations/delete_collection.html) | Drop a collection | ✘ (data loss) |
+| [`update_collection`](https://diegoglozano.github.io/revector/reference/operations/update_collection.html) | Patch `hnsw_config`, `quantization_config`, `optimizers_config`, or per-vector params in place | ✘ (prior state unknown) |
+| [`create_vector`](https://diegoglozano.github.io/revector/reference/operations/create_vector.html) | Add a named dense vector (Qdrant v1.18+) | ✔ → `delete_vector` |
+| [`create_sparse_vector`](https://diegoglozano.github.io/revector/reference/operations/create_sparse_vector.html) | Add a named sparse vector | ✔ → `delete_vector` |
+| [`delete_vector`](https://diegoglozano.github.io/revector/reference/operations/delete_vector.html) | Drop a named vector | ✘ (data loss) |
+| [`create_payload_index`](https://diegoglozano.github.io/revector/reference/operations/create_payload_index.html) | Index a payload field | ✔ → `delete_payload_index` |
+| [`delete_payload_index`](https://diegoglozano.github.io/revector/reference/operations/delete_payload_index.html) | Remove a payload index | ✔ iff `schema:` is given |
+| [`create_alias`](https://diegoglozano.github.io/revector/reference/operations/create_alias.html) | Point an alias at a collection | ✔ → `delete_alias` |
+| [`delete_alias`](https://diegoglozano.github.io/revector/reference/operations/delete_alias.html) | Remove an alias | ✘ (target unknown) |
+| [`switch_alias`](https://diegoglozano.github.io/revector/reference/operations/switch_alias.html) | Atomically repoint an alias (zero-downtime swap) | ✘ (prior target unknown) |
+| [`exec`](https://diegoglozano.github.io/revector/reference/operations/exec.html) | Run a shell command (the re-embedding escape hatch) | ✘ unless `down` provided |
 
-When an operation isn't auto-reversible, supply an explicit `down:` block — then
-`revector down` uses it verbatim.
+Each operation page links to a runnable example and the full list of spec
+fields. The shapes referenced above (`CollectionSpec`, `VectorSpec`,
+`HnswConfigSpec`, `QuantizationSpec`, …) are documented on the
+[Specs](https://diegoglozano.github.io/revector/reference/specs.html) page.
 
 ## Commands
 
@@ -145,152 +136,25 @@ When an operation isn't auto-reversible, supply an explicit `down:` block — th
 | `revector up [--to <rev>] [--dry-run]` | Apply pending migrations. |
 | `revector down [--to <rev>] [--steps N] [--dry-run]` | Roll back migrations. |
 | `revector to <rev> [--dry-run]` | Migrate to an exact revision (up or down). |
-| `revector validate` | Parse all migrations and resolve the chain offline — no Qdrant connection. Good as a CI / pre-commit check. |
-| `revector stamp <rev\|head\|base> [--dry-run]` | Mark the DB as being at a revision **without running** any ops — for adopting an existing collection (Alembic's `stamp`). |
+| `revector validate` | Parse all migrations and resolve the chain offline — no Qdrant connection. |
+| `revector stamp <rev\|head\|base> [--dry-run]` | Mark the DB as being at a revision **without running** any ops. |
 | `revector diff <collection> --spec <file.yaml>` | Compare a declared collection spec against the live collection. |
 
-`--dry-run` prints the plan without touching Qdrant.
+Full command, configuration, and flag reference:
+<https://diegoglozano.github.io/revector/reference/commands.html>.
 
-### Safety
+## More
 
-- **Confirmation.** Rollbacks (`down`, and a `to` that moves backwards) prompt
-  before proceeding. Pass `-y` / `--yes` to skip the prompt; in a non-interactive
-  shell (CI) revector refuses rather than guessing, so `--yes` is required there.
-- **Advisory lock.** `up` / `down` / `to` / `stamp` take a lock record in the
-  tracking collection for the duration of the run, so two concurrent runs (e.g.
-  parallel CI jobs) don't stomp on each other. If a previous run died and left a
-  stale lock, `--force` overrides it. (Best-effort — Qdrant has no
-  compare-and-set — but it reliably catches the common case.)
-
-### Adopting an existing collection
-
-If you already have a collection that matches an early migration, `stamp` lets
-revector take over without re-creating it:
-
-```sh
-# Tell revector the DB is already at 0002 (no operations run)
-revector stamp 0002_index_and_quantize
-# Now apply everything after it normally
-revector up
-```
-
-## Configuration
-
-Settings are layered (highest precedence first): **CLI flags → `REVECTOR_*`
-environment variables → `revector.toml` → defaults.**
-
-```toml
-# revector.toml
-url = "http://localhost:6334"
-migrations_dir = "migrations"
-# api_key = "..."                      # or REVECTOR_API_KEY
-# tracking_collection = "_revector_migrations"
-```
-
-| Setting | Env | Default |
-|---------|-----|---------|
-| `url` | `REVECTOR_URL` | `http://localhost:6334` |
-| `api_key` | `REVECTOR_API_KEY` | _none_ |
-| `migrations_dir` | `REVECTOR_MIGRATIONS_DIR` | `migrations` |
-| `tracking_collection` | `REVECTOR_TRACKING_COLLECTION` | `_revector_migrations` |
-
-Set `REVECTOR_LOG=revector=debug` for verbose logging (or pass `-v` / `-vv`).
-
-## Drift detection (`diff`)
-
-`revector diff` compares a declared collection spec against the live collection.
-It is **declaration-driven**: only fields you actually wrote in the spec are
-compared. A field you leave unset means "don't care", never "must be unset" —
-this avoids the classic Alembic-autogenerate false positives caused by Qdrant
-normalizing and defaulting config on read.
-
-```sh
-revector diff products --spec products.spec.yaml
-# collection `products` has 1 difference(s):
-#   vectors.<default>.size : declared 1024 | live 768
-```
-
-## Re-embedding (the exec-hook)
-
-Changing a vector's `size` or `distance` is structural — Qdrant can't mutate it
-in place. The path is: add a new named vector → re-embed points with your model
-→ drop the old vector. The re-embedding step is the one thing a generic binary
-can't own, so revector shells out to *your* command:
-
-```yaml
-up:
-  - op: create_vector
-    collection: products
-    name: text_v2
-    spec: { size: 1024, distance: Cosine }
-
-  - op: exec
-    name: re-embed with the new model
-    command: "python scripts/reembed.py --collection products --target text_v2"
-
-  - op: delete_vector          # irreversible — make this a separate, deliberate migration
-    collection: products
-    name: text_v1
-```
-
-The command runs via `sh -c`, inherits the environment and stdio, and a non-zero
-exit aborts the migration.
-
-## How state is tracked
-
-Applied revisions are stored as points in the `_revector_migrations` collection
-(a dummy 1-d vector plus a payload of revision id, parent, checksum, and
-timestamp). Because the checksum of each migration file is recorded, revector
-refuses to proceed if a migration was **edited after being applied** — catching
-silent divergence between your files and the database.
-
-## Scope & limitations
-
-- **Linear chains only** (single base, single head) in v1 — branching/merging is
-  rejected with a clear error.
-- Per-vector `hnsw_config` / `quantization_config` can't be set at
-  `create_vector` time (Qdrant's add-vector API doesn't accept them); apply them
-  with a follow-up `update_collection` step.
-- `diff` reads a standalone spec file; folding the full migration chain into a
-  desired-state spec is future work.
-
-## Development
-
-```sh
-cargo test                       # unit + logic tests
-cargo clippy --all-targets       # lints
-cargo fmt                        # format
-```
-
-Integration tests spin up a real Qdrant via [testcontainers] (Docker required);
-they skip automatically when Docker is unavailable. To run them against an
-already-running Qdrant instead:
-
-```sh
-REVECTOR_TEST_URL=http://localhost:6334 cargo test --test integration
-```
-
-[testcontainers]: https://github.com/testcontainers/testcontainers-rs
-
-## Security & supply chain
-
-- **Dependency scanning.** [`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny)
-  runs in CI (and weekly, to catch newly-published advisories) checking
-  vulnerabilities, licenses, banned/duplicate crates, and that every dependency
-  comes from crates.io. Config: [`deny.toml`](deny.toml).
-- **Automated updates.** Dependabot opens weekly PRs for Rust deps and GitHub
-  Actions, so security patches land promptly.
-- **Build provenance.** Release binaries carry [SLSA build-provenance
-  attestations](https://github.com/slsa-framework/slsa) generated by cargo-dist,
-  so you can verify an artifact was built by this repo's CI:
-  ```sh
-  gh attestation verify revector-x86_64-unknown-linux-gnu.tar.xz --repo diegoglozano/revector
-  ```
-- **Reproducibility.** `Cargo.lock` is committed and `cargo publish --locked` is
-  used, so published builds resolve to pinned versions.
-- **Minimal runtime surface.** The known advisories in the tree are confined to
-  *dev-dependencies* (the test harness) and don't ship in the binary; see
-  `deny.toml` for the tracked exceptions.
+- [Quick start](https://diegoglozano.github.io/revector/quick-start.html)
+- [Migration files](https://diegoglozano.github.io/revector/migration-files.html)
+- [Operations reference](https://diegoglozano.github.io/revector/reference/operations.html)
+- [Specs](https://diegoglozano.github.io/revector/reference/specs.html)
+- [Drift detection (`diff`)](https://diegoglozano.github.io/revector/guides/diff.html)
+- [Re-embedding (the exec-hook)](https://diegoglozano.github.io/revector/guides/re-embedding.html)
+- [Adopting an existing collection](https://diegoglozano.github.io/revector/guides/adopting.html)
+- [How state is tracked](https://diegoglozano.github.io/revector/guides/state-tracking.html)
+- [Security & supply chain](https://diegoglozano.github.io/revector/project/security.html)
+- [Development](https://diegoglozano.github.io/revector/project/development.html)
 
 ## License
 
