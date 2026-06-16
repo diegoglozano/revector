@@ -65,13 +65,13 @@ The automatable surface we haven't exposed as ops yet:
 ## Ecosystem & docs
 
 - [ ] **mdBook documentation site.**
-- [ ] **Align with / publish a Qdrant "skill"** — Qdrant Skills
-  (https://skills.qdrant.tech, https://github.com/qdrant/skills) are agent-facing
-  "when/why" decision trees; their topics include **model migration** and
-  **version upgrades**, which is exactly revector's lane. Worth: (a) authoring a
-  `revector` skill so agents reach for it during schema/model migrations, and
-  (b) making the re-embedding/add-vector→drop-vector flow a first-class,
-  documented "model migration" recipe.
+- [x] **Authored a Qdrant-style Agent Skill** — `skills/revector/SKILL.md`
+  (schema/config migration decision tree, complementing the upstream
+  `qdrant-model-migration` skill). Follows the `qdrant/skills` leaf-skill format.
+- [ ] **Submit the skill upstream** to https://github.com/qdrant/skills (likely
+  as `qdrant-schema-migration`); run their `validate_skills.py` first.
+- [ ] **First-class "model migration" recipe** — document the add-vector →
+  re-embed (exec-hook) → drop-old flow end-to-end in the docs/mdBook.
 
 ## Multi-backend support (v2/v3)
 
