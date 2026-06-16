@@ -59,6 +59,14 @@ pub enum Error {
     #[error("revision {revision} is irreversible: {reason}")]
     Irreversible { revision: String, reason: String },
 
+    /// Another revector run holds the migration lock.
+    #[error("migration lock held by {holder} since {since}; another `revector` run may be in progress (use --force to override a stale lock)")]
+    Locked { holder: String, since: String },
+
+    /// A destructive operation was requested without confirmation.
+    #[error("aborted: confirmation required (re-run with --yes to proceed non-interactively)")]
+    NotConfirmed,
+
     /// An exec-hook command exited non-zero.
     #[error("exec hook failed (exit {code}): {command}")]
     ExecHook { command: String, code: i32 },

@@ -55,10 +55,11 @@ The automatable surface we haven't exposed as ops yet:
   without re-creating it. Supports a revision id plus `head` / `base`.
 - [x] **`validate` / lint** — parse all migrations + resolve the chain with no DB
   connection (great as a CI/pre-commit check).
-- [ ] **Advisory locking** — prevent two concurrent `up` runs (e.g. parallel CI)
-  from racing; store a lock record in the tracking collection.
-- [ ] **Confirmations + `--yes`** — prompt before irreversible/destructive ops
-  unless `--yes`; today `up`/`down` act immediately.
+- [x] **Advisory locking** — `up`/`down`/`to`/`stamp` take a lock record in the
+  tracking collection; concurrent runs fail with a clear error, `--force`
+  overrides a stale lock. (Best-effort; no compare-and-set in Qdrant.)
+- [x] **Confirmations + `--yes`** — rollbacks prompt before proceeding; `--yes`
+  skips, and a non-interactive shell refuses without it.
 - [ ] **`--json` output** on `status` / `up` / `down` / `diff` for CI consumption.
 
 ## Ecosystem & docs

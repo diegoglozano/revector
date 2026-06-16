@@ -49,6 +49,30 @@ fn init_tracing(verbose: u8) {
         .init();
 }
 
+/// Ask the user to confirm a destructive action.
+///
+/// Returns `Ok(true)` when `--yes` was passed. Otherwise prompts on an
+/// interactive terminal; if stdin is not a TTY (e.g. CI) and `--yes` was not
+/// given, returns [`revector::Error::NotConfirmed`] rather than hanging or
+/// silently proceeding.
+fn confirm(prompt: &str, yes: bool) -> revector::Result<bool> {
+    use std::io::{BufRead, IsTerminal, Write};
+    if yes {
+        return Ok(true);
+    }
+    if !std::io::stdin().is_terminal() {
+        return Err(revector::Error::NotConfirmed);
+    }
+    print!("{prompt} [y/N] ");
+    std::io::stdout().flush().ok();
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
 /// Resolve config from file/env, then overlay explicit CLI flags.
 fn resolve_config(cli: &Cli) -> revector::Result<Config> {
     let mut config = Config::load(cli.config.as_deref())?;
@@ -132,26 +156,61 @@ async fn run(cli: Cli) -> revector::Result<()> {
         }
         Command::Up { to, dry_run } => {
             let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, &project_root)
-                .dry_run(dry_run);
+                .dry_run(dry_run)
+                .force(cli.force);
             runner.warn_orphans().await?;
             let applied = runner.up(to.as_deref()).await?;
             print_applied("Applied", &applied.revisions, applied.dry_run);
         }
         Command::Down { to, steps, dry_run } => {
             let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, &project_root)
-                .dry_run(dry_run);
+                .dry_run(dry_run)
+                .force(cli.force);
+            if !dry_run {
+                let plan = runner.plan_down(to.as_deref(), steps).await?;
+                if plan.is_empty() {
+                    println!("Nothing to roll back.");
+                    return Ok(());
+                }
+                let prompt = format!(
+                    "About to roll back {} revision(s): {}.\nRollbacks may be irreversible. Continue?",
+                    plan.len(),
+                    plan.join(", ")
+                );
+                if !confirm(&prompt, cli.yes)? {
+                    println!("Aborted.");
+                    return Ok(());
+                }
+            }
             let applied = runner.down(to.as_deref(), steps).await?;
             print_applied("Rolled back", &applied.revisions, applied.dry_run);
         }
         Command::To { revision, dry_run } => {
             let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, &project_root)
-                .dry_run(dry_run);
+                .dry_run(dry_run)
+                .force(cli.force);
+            if !dry_run {
+                // A `to` below the current revision is a rollback — confirm it.
+                let rollback = runner.plan_down(Some(&revision), 0).await?;
+                if !rollback.is_empty() {
+                    let prompt = format!(
+                        "`to {revision}` will roll back {} revision(s): {}.\nContinue?",
+                        rollback.len(),
+                        rollback.join(", ")
+                    );
+                    if !confirm(&prompt, cli.yes)? {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                }
+            }
             let applied = runner.to(&revision).await?;
             print_applied("Migrated", &applied.revisions, applied.dry_run);
         }
         Command::Stamp { revision, dry_run } => {
             let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, &project_root)
-                .dry_run(dry_run);
+                .dry_run(dry_run)
+                .force(cli.force);
             let stamped = runner.stamp(&revision).await?;
             print_stamped(&stamped);
         }

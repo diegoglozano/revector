@@ -329,3 +329,34 @@ async fn stamp_marks_revisions_without_running_ops() {
     assert_eq!(cleared.removed.len(), 2);
     assert_eq!(runner.status().await.unwrap().current, None);
 }
+
+#[tokio::test]
+async fn advisory_lock_blocks_concurrent_runs() {
+    let (_c, config, _lock) = boot_or_skip!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_1)]);
+
+    let qdrant = client::connect(&config).unwrap();
+    cleanup(&qdrant, &["products"]).await;
+    let chain = resolve_chain(dir);
+
+    // Simulate another run holding the lock.
+    let tracker = revector::tracking::Tracker::new(&qdrant, &config.tracking_collection);
+    tracker.ensure().await.unwrap();
+    tracker.acquire_lock("other-run", false).await.unwrap();
+
+    // `up` must refuse while the lock is held, and must not mutate anything.
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    let err = runner.up(None).await.unwrap_err();
+    assert!(matches!(err, revector::Error::Locked { .. }), "got {err:?}");
+    assert!(!qdrant.collection_exists("products").await.unwrap());
+
+    // `--force` overrides the lock and applies.
+    let forced = Runner::new(&qdrant, &chain, &config.tracking_collection, dir).force(true);
+    let applied = forced.up(None).await.unwrap();
+    assert_eq!(applied.revisions, vec!["0001_products"]);
+
+    // A successful run releases the lock.
+    assert!(tracker.read_lock().await.unwrap().is_none());
+}

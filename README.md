@@ -151,6 +151,17 @@ When an operation isn't auto-reversible, supply an explicit `down:` block — th
 
 `--dry-run` prints the plan without touching Qdrant.
 
+### Safety
+
+- **Confirmation.** Rollbacks (`down`, and a `to` that moves backwards) prompt
+  before proceeding. Pass `-y` / `--yes` to skip the prompt; in a non-interactive
+  shell (CI) revector refuses rather than guessing, so `--yes` is required there.
+- **Advisory lock.** `up` / `down` / `to` / `stamp` take a lock record in the
+  tracking collection for the duration of the run, so two concurrent runs (e.g.
+  parallel CI jobs) don't stomp on each other. If a previous run died and left a
+  stale lock, `--force` overrides it. (Best-effort — Qdrant has no
+  compare-and-set — but it reliably catches the common case.)
+
 ### Adopting an existing collection
 
 If you already have a collection that matches an early migration, `stamp` lets
