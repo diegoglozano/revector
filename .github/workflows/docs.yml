@@ -30,6 +30,11 @@ jobs:
   build:
     name: build (mdBook)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # configure-pages auto-enables Pages on first run; that needs write.
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +44,12 @@ jobs:
           curl -sSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
             | tar -xz -C "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Auto-enable GitHub Pages (Source: GitHub Actions) on first run; sets
+      # the base path so relative URLs resolve correctly under /<repo>/.
+      - name: Configure Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v5
 
       - name: Build
         run: mdbook build docs
