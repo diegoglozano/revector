@@ -6,6 +6,7 @@
 
 - [Install](./install.md)
 - [Quick start](./quick-start.md)
+- [Tutorial: from zero to a versioned collection](./tutorial.md)
 - [Migration files](./migration-files.md)
 
 # Reference
