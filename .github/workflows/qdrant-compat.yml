@@ -1,0 +1,49 @@
+name: Qdrant compatibility
+
+# Early-warning for new Qdrant server releases. revector pins its test suite to
+# a specific server version (see SUPPORTED_QDRANT_VERSION in tests/integration.rs
+# and the compatibility table in the README). This job re-runs the full suite
+# against a *different* server — by default the newest published image — so we
+# learn about breakage before users do:
+#
+#   * green  -> the new Qdrant release is safe; bump the pin + qdrant-client and
+#               update the README compatibility table.
+#   * red    -> the new release needs code changes before we can support it.
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      qdrant_version:
+        description: "Qdrant server image tag to test against (e.g. latest, v1.19.0)"
+        required: false
+        default: "latest"
+
+# Least privilege: only needs to read the repo.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Point the integration suite at the candidate server instead of the pinned one.
+  REVECTOR_QDRANT_VERSION: ${{ github.event.inputs.qdrant_version || 'latest' }}
+
+jobs:
+  compat:
+    name: integration vs qdrant/qdrant:${{ github.event.inputs.qdrant_version || 'latest' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Integration tests against candidate Qdrant
+        # Docker is available on GitHub-hosted runners; testcontainers pulls the
+        # tag named by REVECTOR_QDRANT_VERSION.
+        run: cargo test --all-features --workspace

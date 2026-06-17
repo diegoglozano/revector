@@ -18,6 +18,13 @@ use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
 
+/// Qdrant server version the suite is pinned to. Kept in lockstep with the
+/// `qdrant-client` crate in `Cargo.toml` and the compatibility table in the
+/// README — they are bumped together. Override with `REVECTOR_QDRANT_VERSION`
+/// to probe a different server without touching code; the scheduled
+/// `qdrant-compat` CI job points this at `latest` to catch new releases early.
+const SUPPORTED_QDRANT_VERSION: &str = "v1.18.2";
+
 /// Boot a Qdrant container and return it alongside a ready config.
 ///
 /// Returns `None` (and prints a skip notice) when Docker is unavailable or the
@@ -40,7 +47,9 @@ async fn boot() -> Option<(Option<testcontainers::ContainerAsync<GenericImage>>,
         return Some((None, config));
     }
 
-    let container = match GenericImage::new("qdrant/qdrant", "latest")
+    let tag = std::env::var("REVECTOR_QDRANT_VERSION")
+        .unwrap_or_else(|_| SUPPORTED_QDRANT_VERSION.to_string());
+    let container = match GenericImage::new("qdrant/qdrant", tag.as_str())
         .with_exposed_port(6334.tcp())
         .with_wait_for(WaitFor::message_on_stdout("Actix runtime found"))
         .start()
