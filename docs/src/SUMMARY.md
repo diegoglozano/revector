@@ -30,6 +30,7 @@
 # Guides
 
 - [Drift detection (`diff`)](./guides/diff.md)
+- [Model migration (end-to-end recipe)](./guides/model-migration.md)
 - [Re-embedding (the exec-hook)](./guides/re-embedding.md)
 - [Adopting an existing collection](./guides/adopting.md)
 - [How state is tracked](./guides/state-tracking.md)

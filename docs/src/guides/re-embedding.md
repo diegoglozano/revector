@@ -35,3 +35,10 @@ gives you:
   losing data.
 - An explicit checkpoint where someone has to look at the new state before the
   old one is destroyed.
+
+## Full recipe
+
+This page covers the exec-hook mechanics. For the complete, copy-pasteable
+walkthrough — three migrations, a resumable re-embed script, the verify
+checkpoint, rollback at each stage, and the alias-based collection-rebuild
+variant — see [Model migration (end-to-end recipe)](./model-migration.md).

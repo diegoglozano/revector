@@ -2,7 +2,9 @@
 
 Run a shell command as a migration step — the escape hatch for steps a generic
 binary can't own (most often re-embedding). See the
-[Re-embedding guide](../../guides/re-embedding.md) for the canonical pattern.
+[Re-embedding guide](../../guides/re-embedding.md) for the canonical pattern, and
+the [Model migration recipe](../../guides/model-migration.md) for the full
+end-to-end flow.
 
 ## Example
 
