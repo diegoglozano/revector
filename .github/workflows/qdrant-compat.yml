@@ -35,7 +35,7 @@ jobs:
     name: integration vs qdrant/qdrant:${{ github.event.inputs.qdrant_version || 'latest' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
