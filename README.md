@@ -23,6 +23,25 @@ them back with a single static binary. No Python venv, no external state store.
 
 ---
 
+## Qdrant compatibility
+
+revector tracks Qdrant closely. Each release pins to — and is tested against — a
+specific Qdrant server line, kept in lockstep with the `qdrant-client` crate:
+
+| revector | `qdrant-client` crate | Qdrant server (tested) |
+|----------|-----------------------|------------------------|
+| 0.2.x    | 1.18                  | 1.18.x (CI runs `v1.18.2`) |
+
+**How this stays current.** A weekly
+[`qdrant-compat`](.github/workflows/qdrant-compat.yml) CI job re-runs the full
+integration suite against `qdrant/qdrant:latest`. When a new Qdrant version ships
+and that job stays green, we bump the `qdrant-client` crate, the pinned server
+tag, and this table together; if it goes red, the new version needs code changes
+first. Dependabot proposes the matching `qdrant-client` bump as its own PR. The
+pinned server version lives in `SUPPORTED_QDRANT_VERSION` (`tests/integration.rs`)
+and can be overridden with the `REVECTOR_QDRANT_VERSION` env var when running the
+tests locally.
+
 ## Install
 
 Once a release is cut, prebuilt binaries for Linux, macOS, and Windows are
