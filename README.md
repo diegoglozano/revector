@@ -152,6 +152,7 @@ Full command, configuration, and flag reference:
 - [Drift detection (`diff`)](https://diegoglozano.github.io/revector/guides/diff.html)
 - [Re-embedding (the exec-hook)](https://diegoglozano.github.io/revector/guides/re-embedding.html)
 - [Adopting an existing collection](https://diegoglozano.github.io/revector/guides/adopting.html)
+- [CI/CD integration](https://diegoglozano.github.io/revector/guides/cicd.html)
 - [How state is tracked](https://diegoglozano.github.io/revector/guides/state-tracking.html)
 - [Security & supply chain](https://diegoglozano.github.io/revector/project/security.html)
 - [Development](https://diegoglozano.github.io/revector/project/development.html)
