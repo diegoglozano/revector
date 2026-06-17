@@ -83,8 +83,10 @@ The automatable surface we haven't exposed as ops yet:
   `qdrant-model-migration` skill). Follows the `qdrant/skills` leaf-skill format.
 - [ ] **Submit the skill upstream** to https://github.com/qdrant/skills (likely
   as `qdrant-schema-migration`); run their `validate_skills.py` first.
-- [ ] **First-class "model migration" recipe** — document the add-vector →
-  re-embed (exec-hook) → drop-old flow end-to-end in the docs/mdBook.
+- [x] **First-class "model migration" recipe** — document the add-vector →
+  re-embed (exec-hook) → drop-old flow end-to-end in the docs/mdBook
+  ([`guides/model-migration.md`](docs/src/guides/model-migration.md)), covering
+  both the named-vector swap and the collection-rebuild + alias cutover.
 
 ## Multi-backend support (v2/v3)
 
