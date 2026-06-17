@@ -34,6 +34,7 @@
 - [Model migration (end-to-end recipe)](./guides/model-migration.md)
 - [Re-embedding (the exec-hook)](./guides/re-embedding.md)
 - [Adopting an existing collection](./guides/adopting.md)
+- [CI/CD integration](./guides/cicd.md)
 - [How state is tracked](./guides/state-tracking.md)
 
 # Project

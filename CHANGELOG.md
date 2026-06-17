@@ -4,6 +4,13 @@ All notable changes to revector are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Docs: a CI/CD integration guide covering offline `validate` on pull requests,
+  `up` on deploy, drift checks via `diff`, and non-interactive usage, with
+  GitHub Actions and GitLab CI examples.
+
 ## [0.2.0]
 
 ### Added
