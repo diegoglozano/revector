@@ -6,6 +6,8 @@
 [![Docs](https://github.com/diegoglozano/revector/actions/workflows/docs.yml/badge.svg)](https://diegoglozano.github.io/revector/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
+![revector demo: init → new → up → status → down](https://raw.githubusercontent.com/diegoglozano/revector/main/docs/demo/revector.gif)
+
 revector brings ordered, reversible, database-tracked migrations to Qdrant —
 the piece that, unlike for relational databases, didn't exist yet. You write
 declarative YAML migrations, commit them next to your code, and apply or roll

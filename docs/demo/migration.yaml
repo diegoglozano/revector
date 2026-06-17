@@ -1,0 +1,21 @@
+revision: "0001_products"
+down_revision: null            # null marks the base of the chain
+description: create products collection
+
+up:
+  - op: create_collection
+    name: products
+    spec:
+      vectors:
+        "":                    # "" is the unnamed/default vector
+          size: 768
+          distance: Cosine
+      hnsw_config:
+        m: 16
+        ef_construct: 128
+
+  - op: create_payload_index
+    collection: products
+    field_name: category
+    schema: keyword
+# No `down:` block — revector auto-inverts the `up` ops on rollback.
