@@ -31,7 +31,8 @@ live in ad-hoc scripts or a teammate's shell history. revector makes them:
 
 ## Where to next
 
-- New here? → [Install](./install.md) → [Quick start](./quick-start.md).
+- New here? → [Install](./install.md) → [Quick start](./quick-start.md) → the
+  full [Tutorial](./tutorial.md) (local Docker, from scratch).
 - Writing a migration? → [Migration files](./migration-files.md) and the
   [Operations reference](./reference/operations.md).
 - Want to know every knob? → [Specs](./reference/specs.md).

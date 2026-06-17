@@ -19,5 +19,9 @@ revector status
 revector down
 ```
 
+Want the full, hands-on version — starting a local Qdrant in Docker and building
+a collection from scratch? See the
+[Tutorial](./tutorial.md).
+
 See the [Commands reference](./reference/commands.md) for every subcommand and
 flag, and [Migration files](./migration-files.md) for the YAML format.
