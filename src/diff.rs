@@ -9,11 +9,11 @@
 //! unset". This keeps `diff` quiet unless something the user actually declared
 //! has drifted.
 
-use qdrant_client::qdrant::{vectors_config::Config as VConfig, VectorParams};
+use qdrant_client::qdrant::{vectors_config::Config as VConfig, SparseVectorParams, VectorParams};
 use qdrant_client::Qdrant;
 
 use crate::error::{Error, Result};
-use crate::spec::{CollectionSpec, HnswConfigSpec, VectorSpec};
+use crate::spec::{CollectionSpec, HnswConfigSpec, SparseVectorSpec, VectorSpec};
 
 /// A single detected difference between declared and live state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +140,30 @@ fn diff_vector(
     }
 }
 
+fn diff_sparse_vector(
+    diffs: &mut Vec<Difference>,
+    name: &str,
+    declared: &SparseVectorSpec,
+    live: &SparseVectorParams,
+) {
+    let prefix = format!("sparse_vectors.{name}");
+    let index = live.index.as_ref();
+    cmp(
+        diffs,
+        &format!("{prefix}.on_disk"),
+        declared.on_disk,
+        index.and_then(|i| i.on_disk).unwrap_or_default(),
+    );
+    cmp(
+        diffs,
+        &format!("{prefix}.full_scan_threshold"),
+        declared.full_scan_threshold,
+        index
+            .and_then(|i| i.full_scan_threshold)
+            .unwrap_or_default(),
+    );
+}
+
 /// Diff a declared collection spec against the live collection.
 pub async fn diff_collection(
     client: &Qdrant,
@@ -193,6 +217,32 @@ pub async fn diff_collection(
         if !spec.vectors.contains_key(vname) {
             diffs.push(Difference {
                 path: format!("vectors.{vname}"),
+                declared: "absent".to_string(),
+                live: "present (undeclared)".to_string(),
+            });
+        }
+    }
+
+    // --- sparse vectors ----------------------------------------------------
+    let live_sparse = params
+        .sparse_vectors_config
+        .map(|sc| sc.map)
+        .unwrap_or_default();
+
+    for (sname, sspec) in &spec.sparse_vectors {
+        match live_sparse.get(sname) {
+            Some(live) => diff_sparse_vector(&mut diffs, sname, sspec, live),
+            None => diffs.push(Difference {
+                path: format!("sparse_vectors.{sname}"),
+                declared: "present".to_string(),
+                live: "missing".to_string(),
+            }),
+        }
+    }
+    for sname in live_sparse.keys() {
+        if !spec.sparse_vectors.contains_key(sname) {
+            diffs.push(Difference {
+                path: format!("sparse_vectors.{sname}"),
                 declared: "absent".to_string(),
                 live: "present (undeclared)".to_string(),
             });

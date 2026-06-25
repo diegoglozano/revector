@@ -9,12 +9,13 @@ use qdrant_client::qdrant::{
     self, quantization_config, quantization_config_diff, vectors_config, BinaryQuantization,
     CollectionParamsDiff, CreateCollectionBuilder, Datatype as QDatatype, Distance as QDistance,
     FieldType, HnswConfigDiff, OptimizersConfigDiff, ProductQuantization, QuantizationConfig,
-    ScalarQuantization, VectorParams, VectorParamsDiff, VectorsConfig,
+    ScalarQuantization, SparseIndexConfig, SparseVectorConfig, SparseVectorParams, VectorParams,
+    VectorParamsDiff, VectorsConfig,
 };
 
 use crate::spec::{
     CollectionSpec, Datatype, Distance, HnswConfigSpec, OptimizersConfigSpec, PayloadSchemaType,
-    QuantizationSpec, VectorSpec,
+    QuantizationSpec, SparseVectorSpec, VectorSpec,
 };
 
 impl From<Distance> for QDistance {
@@ -186,6 +187,41 @@ pub fn vectors_config(spec: &CollectionSpec) -> VectorsConfig {
     }
 }
 
+/// Convert a [`SparseVectorSpec`] into proto [`SparseVectorParams`].
+///
+/// The spec's `on_disk` / `full_scan_threshold` map onto the sparse
+/// [`SparseIndexConfig`]; we only attach an index when at least one is set so a
+/// bare `{}` sparse entry creates the vector with server defaults.
+pub fn sparse_vector_params(s: &SparseVectorSpec) -> SparseVectorParams {
+    let index = if s.on_disk.is_some() || s.full_scan_threshold.is_some() {
+        Some(SparseIndexConfig {
+            full_scan_threshold: s.full_scan_threshold,
+            on_disk: s.on_disk,
+            datatype: None,
+        })
+    } else {
+        None
+    };
+    SparseVectorParams {
+        index,
+        modifier: None,
+    }
+}
+
+/// Build the [`SparseVectorConfig`] for a collection spec, or `None` when no
+/// sparse vectors are declared (so we don't send an empty map on create).
+pub fn sparse_vectors_config(spec: &CollectionSpec) -> Option<SparseVectorConfig> {
+    if spec.sparse_vectors.is_empty() {
+        return None;
+    }
+    let map = spec
+        .sparse_vectors
+        .iter()
+        .map(|(name, s)| (name.clone(), sparse_vector_params(s)))
+        .collect();
+    Some(SparseVectorConfig { map })
+}
+
 /// Build a [`VectorParamsDiff`] for in-place vector param updates.
 pub fn vector_params_diff(d: &crate::ops::VectorParamsDiff) -> VectorParamsDiff {
     VectorParamsDiff {
@@ -205,7 +241,14 @@ pub fn apply_collection_spec(
     mut builder: CreateCollectionBuilder,
     spec: &CollectionSpec,
 ) -> CreateCollectionBuilder {
-    builder = builder.vectors_config(vectors_config(spec));
+    // Dense vectors are optional: a sparse-only collection declares none, and
+    // sending an empty vectors map would be rejected by Qdrant.
+    if !spec.vectors.is_empty() {
+        builder = builder.vectors_config(vectors_config(spec));
+    }
+    if let Some(sparse) = sparse_vectors_config(spec) {
+        builder = builder.sparse_vectors_config(sparse);
+    }
 
     if let Some(h) = &spec.hnsw_config {
         builder = builder.hnsw_config(HnswConfigDiff::from(h));
