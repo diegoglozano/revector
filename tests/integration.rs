@@ -240,6 +240,88 @@ async fn up_down_status_roundtrip() {
     assert!(!qdrant.collection_exists("products").await.unwrap());
 }
 
+/// A collection whose spec declares sparse vectors must actually come up with
+/// those sparse vectors live. This is the end-to-end guard for the bug where
+/// `create_collection` silently dropped `sparse_vectors`.
+const MIG_SPARSE: &str = r#"
+revision: "0001_sparse"
+down_revision: null
+description: create collection with dense + sparse vectors
+up:
+  - op: create_collection
+    name: hybrid
+    spec:
+      vectors:
+        dense:
+          size: 4
+          distance: Cosine
+      sparse_vectors:
+        text:
+          on_disk: true
+          full_scan_threshold: 5000
+        keywords: {}
+"#;
+
+#[tokio::test]
+async fn create_collection_provisions_sparse_vectors() {
+    let (_c, config, _lock) = boot_or_skip!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_SPARSE)]);
+
+    let qdrant = client::connect(&config).unwrap();
+    cleanup(&qdrant, &["hybrid"]).await;
+    let chain = resolve_chain(dir);
+
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    runner.up(None).await.unwrap();
+    assert!(qdrant.collection_exists("hybrid").await.unwrap());
+
+    let info = qdrant.collection_info("hybrid").await.unwrap();
+    let params = info.result.unwrap().config.unwrap().params.unwrap();
+
+    // The sparse vectors must be present in the live config.
+    let sparse = params
+        .sparse_vectors_config
+        .expect("collection should expose a sparse vectors config");
+    assert!(
+        sparse.map.contains_key("text") && sparse.map.contains_key("keywords"),
+        "sparse vectors missing: {:?}",
+        sparse.map.keys().collect::<Vec<_>>()
+    );
+
+    // And the declared index params should have been honoured.
+    let text_index = sparse.map.get("text").unwrap().index.as_ref().unwrap();
+    assert_eq!(text_index.on_disk, Some(true));
+    assert_eq!(text_index.full_scan_threshold, Some(5000));
+
+    // `diff` should report the collection in sync against its own spec.
+    let spec: CollectionSpec = serde_yaml::from_str(
+        r#"
+vectors:
+  dense:
+    size: 4
+    distance: Cosine
+sparse_vectors:
+  text:
+    on_disk: true
+    full_scan_threshold: 5000
+  keywords: {}
+"#,
+    )
+    .unwrap();
+    let report = diff::diff_collection(&qdrant, "hybrid", &spec)
+        .await
+        .unwrap();
+    assert!(
+        report.in_sync(),
+        "expected in sync, got {:?}",
+        report.differences
+    );
+
+    cleanup(&qdrant, &["hybrid"]).await;
+}
+
 #[tokio::test]
 async fn dry_run_does_not_mutate() {
     let (_c, config, _lock) = boot_or_skip!();

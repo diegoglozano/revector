@@ -4,6 +4,7 @@
 use revector::chain::Chain;
 use revector::migration::{checksum_bytes, Migration, MigrationFile};
 use revector::ops::{Operation, Reversibility};
+use revector::spec::CollectionSpec;
 
 /// Build a `Migration` directly from YAML, bypassing the filesystem.
 fn mig(yaml: &str) -> Migration {
@@ -218,4 +219,55 @@ fn multi_op_down_is_reverse_order() {
 fn checksum_is_stable_and_sensitive() {
     assert_eq!(checksum_bytes(b"abc"), checksum_bytes(b"abc"));
     assert_ne!(checksum_bytes(b"abc"), checksum_bytes(b"abd"));
+}
+
+/// Regression: a collection spec that declares sparse vectors must translate
+/// into a non-empty sparse config on create. Previously `apply_collection_spec`
+/// dropped `sparse_vectors` entirely, so collections came up dense-only.
+#[test]
+fn collection_spec_carries_sparse_vectors_into_config() {
+    let spec: CollectionSpec = serde_yaml::from_str(
+        r#"
+vectors:
+  dense:
+    size: 768
+    distance: Cosine
+sparse_vectors:
+  text:
+    on_disk: true
+    full_scan_threshold: 5000
+  keywords: {}
+"#,
+    )
+    .expect("valid collection spec");
+
+    let sparse = revector::convert::sparse_vectors_config(&spec)
+        .expect("sparse vectors should produce a config");
+    assert_eq!(sparse.map.len(), 2);
+
+    let text = sparse.map.get("text").expect("text sparse vector present");
+    let index = text
+        .index
+        .expect("explicit on_disk/threshold yields an index");
+    assert_eq!(index.on_disk, Some(true));
+    assert_eq!(index.full_scan_threshold, Some(5000));
+
+    // A bare `{}` entry still creates the vector, just with server defaults.
+    let keywords = sparse.map.get("keywords").expect("keywords present");
+    assert!(keywords.index.is_none());
+}
+
+/// A spec with no sparse vectors must not emit an (empty) sparse config.
+#[test]
+fn dense_only_spec_has_no_sparse_config() {
+    let spec: CollectionSpec = serde_yaml::from_str(
+        r#"
+vectors:
+  "":
+    size: 4
+    distance: Dot
+"#,
+    )
+    .expect("valid collection spec");
+    assert!(revector::convert::sparse_vectors_config(&spec).is_none());
 }

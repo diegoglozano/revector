@@ -11,6 +11,12 @@ All notable changes to revector are documented here. The format is based on
   `up` on deploy, drift checks via `diff`, and non-interactive usage, with
   GitHub Actions and GitLab CI examples.
 
+### Fixed
+- `create_collection` now provisions the `sparse_vectors` declared in a spec.
+  They were silently dropped during spec→client conversion, so collections came
+  up dense-only (and sparse-only specs sent an empty dense map). `diff` now also
+  compares declared sparse vectors against the live collection.
+
 ## [0.2.0]
 
 ### Added
