@@ -9,8 +9,8 @@ use qdrant_client::qdrant::{
     self, quantization_config, quantization_config_diff, vectors_config, BinaryQuantization,
     CollectionParamsDiff, CreateCollectionBuilder, Datatype as QDatatype, Distance as QDistance,
     FieldType, HnswConfigDiff, OptimizersConfigDiff, ProductQuantization, QuantizationConfig,
-    ScalarQuantization, SparseIndexConfig, SparseVectorConfig, SparseVectorParams, VectorParams,
-    VectorParamsDiff, VectorsConfig,
+    ScalarQuantization, SparseIndexConfig, SparseVectorConfig, SparseVectorParams,
+    TurboQuantization, VectorParams, VectorParamsDiff, VectorsConfig,
 };
 
 use crate::spec::{
@@ -95,6 +95,18 @@ fn compression_ratio(s: &str) -> i32 {
     }
 }
 
+/// Map a TurboQuant bit keyword (`1`, `1.5`, `2`, `4`) to the proto enum
+/// discriminant. Unknown values yield `None` so Qdrant applies its own default.
+fn turbo_quant_bits(s: &str) -> Option<i32> {
+    match s.trim() {
+        "1" => Some(qdrant::TurboQuantBitSize::Bits1 as i32),
+        "1.5" | "1_5" => Some(qdrant::TurboQuantBitSize::Bits15 as i32),
+        "2" => Some(qdrant::TurboQuantBitSize::Bits2 as i32),
+        "4" => Some(qdrant::TurboQuantBitSize::Bits4 as i32),
+        _ => None,
+    }
+}
+
 /// Build the `quantization_config::Quantization` oneof used on create.
 /// Returns `None` for [`QuantizationSpec::Disabled`] — on create, disabled
 /// simply means "don't send any quantization".
@@ -117,6 +129,12 @@ pub fn quantization_oneof(q: &QuantizationSpec) -> Option<quantization_config::Q
             BinaryQuantization {
                 always_ram: b.always_ram,
                 ..Default::default()
+            },
+        )),
+        QuantizationSpec::Turboquant(t) => Some(quantization_config::Quantization::Turboquant(
+            TurboQuantization {
+                always_ram: t.always_ram,
+                bits: t.bits.as_deref().and_then(turbo_quant_bits),
             },
         )),
         QuantizationSpec::Disabled => None,

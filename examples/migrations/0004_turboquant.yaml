@@ -1,0 +1,25 @@
+revision: "0004_turboquant"
+down_revision: "0003_add_image_vector"
+description: switch the collection to TurboQuant quantization
+
+up:
+  - op: update_collection
+    collection: products
+    quantization_config:
+      turboquant:
+        # Bits per component: 1, 1.5, 2, or 4. Fewer bits = smaller & faster,
+        # more bits = higher recall. Omit `bits` to take the server default.
+        bits: "2"
+        always_ram: true
+
+# `update_collection` can't be auto-reversed (the prior config isn't recorded),
+# so we declare the downgrade explicitly. Here we drop back to scalar int8, the
+# quantization this collection used before (see 0002_index_and_quantize).
+down:
+  - op: update_collection
+    collection: products
+    quantization_config:
+      scalar:
+        type: int8
+        quantile: 0.99
+        always_ram: true
