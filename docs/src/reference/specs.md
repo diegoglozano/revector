@@ -93,6 +93,12 @@ quantization_config:
   binary:
     always_ram: true
 
+# turboquant
+quantization_config:
+  turboquant:
+    bits: "1.5"
+    always_ram: true
+
 # disable (update_collection only)
 quantization_config: disabled
 ```
@@ -116,6 +122,16 @@ quantization_config: disabled
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `always_ram` | bool | Keep quantized vectors in RAM. |
+
+### `TurboquantQuantizationSpec`
+
+TurboQuant is Qdrant's fast, data-oblivious quantization (Qdrant 1.16+). It
+encodes each component down to a handful of bits without a training pass.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bits` | string | Bits per component — one of `1`, `1.5`, `2`, `4`. Omitted → server default. |
 | `always_ram` | bool | Keep quantized vectors in RAM. |
 
 ## `OptimizersConfigSpec`

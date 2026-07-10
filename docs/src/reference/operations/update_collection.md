@@ -36,7 +36,7 @@ down:
 |-------|------|----------|-------------|
 | `collection` | string | yes | Collection to update. |
 | `hnsw_config` | [`HnswConfigSpec`](../specs.md#hnswconfigspec) | no | Override collection-level HNSW params. |
-| `quantization_config` | [`QuantizationSpec`](../specs.md#quantizationspec) | no | Set or replace quantization (`scalar` / `product` / `binary` / `disabled`). |
+| `quantization_config` | [`QuantizationSpec`](../specs.md#quantizationspec) | no | Set or replace quantization (`scalar` / `product` / `binary` / `turboquant` / `disabled`). |
 | `optimizers_config` | [`OptimizersConfigSpec`](../specs.md#optimizersconfigspec) | no | Tune optimizer thresholds. |
 | `vectors` | map<name, [`VectorParamsDiff`](../specs.md#vectorparamsdiff)> | no | Patch params of existing named vectors (`on_disk`, `hnsw_config`, `quantization_config`). |
 

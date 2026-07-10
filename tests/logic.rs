@@ -271,3 +271,84 @@ vectors:
     .expect("valid collection spec");
     assert!(revector::convert::sparse_vectors_config(&spec).is_none());
 }
+
+/// Pull the `CollectionSpec` out of a migration's first `create_collection` op.
+fn first_create_spec(m: &Migration) -> &CollectionSpec {
+    match &m.file.up[0] {
+        Operation::CreateCollection { spec, .. } => spec,
+        other => panic!("expected create_collection, got {other:?}"),
+    }
+}
+
+/// A `turboquant` quantization spec authored in YAML parses and converts into
+/// the proto oneof, mapping the `bits` keyword to the right `TurboQuantBitSize`.
+#[test]
+fn turboquant_spec_converts_bits_and_always_ram() {
+    use qdrant_client::qdrant::{quantization_config::Quantization, TurboQuantBitSize};
+    use revector::spec::QuantizationSpec;
+
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+description: turboquant
+up:
+  - op: create_collection
+    name: docs
+    spec:
+      vectors:
+        "":
+          size: 1536
+          distance: Cosine
+      quantization_config:
+        turboquant:
+          bits: "1.5"
+          always_ram: true
+"#);
+
+    let q = first_create_spec(&m)
+        .quantization_config
+        .as_ref()
+        .expect("quantization declared");
+    assert!(matches!(q, QuantizationSpec::Turboquant(_)));
+
+    match revector::convert::quantization_oneof(q).expect("turboquant yields a oneof") {
+        Quantization::Turboquant(t) => {
+            assert_eq!(t.always_ram, Some(true));
+            assert_eq!(t.bits, Some(TurboQuantBitSize::Bits15 as i32));
+        }
+        other => panic!("expected turboquant, got {other:?}"),
+    }
+}
+
+/// TurboQuant `bits` is optional — omitting it leaves the proto field unset so
+/// Qdrant applies its own default, while `always_ram` still flows through.
+#[test]
+fn turboquant_spec_without_bits_leaves_default() {
+    use qdrant_client::qdrant::quantization_config::Quantization;
+
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+description: turboquant default bits
+up:
+  - op: create_collection
+    name: docs
+    spec:
+      vectors:
+        "":
+          size: 8
+          distance: Dot
+      quantization_config:
+        turboquant:
+          always_ram: false
+"#);
+
+    let q = first_create_spec(&m).quantization_config.as_ref().unwrap();
+    match revector::convert::quantization_oneof(q).unwrap() {
+        Quantization::Turboquant(t) => {
+            assert_eq!(t.bits, None);
+            assert_eq!(t.always_ram, Some(false));
+        }
+        other => panic!("expected turboquant, got {other:?}"),
+    }
+}

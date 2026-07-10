@@ -84,6 +84,7 @@ pub enum QuantizationSpec {
     Scalar(ScalarQuantizationSpec),
     Product(ProductQuantizationSpec),
     Binary(BinaryQuantizationSpec),
+    Turboquant(TurboquantQuantizationSpec),
     /// Explicitly disable quantization (used by `update_collection`).
     Disabled,
 }
@@ -113,6 +114,15 @@ pub struct ProductQuantizationSpec {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BinaryQuantizationSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub always_ram: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TurboquantQuantizationSpec {
+    /// Bits per component: `1`, `1.5`, `2`, or `4`. Omitted → server default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bits: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub always_ram: Option<bool>,
 }
