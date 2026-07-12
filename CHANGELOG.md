@@ -6,6 +6,8 @@ All notable changes to revector are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-12
+
 ### Added
 - TurboQuant quantization (`quantization_config.turboquant`) — Qdrant's fast,
   data-oblivious quantization (1.16+). Configurable `bits` (`1`, `1.5`, `2`,
