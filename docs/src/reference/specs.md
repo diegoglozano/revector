@@ -126,7 +126,7 @@ quantization_config: disabled
 
 ### `TurboquantQuantizationSpec`
 
-TurboQuant is Qdrant's fast, data-oblivious quantization (Qdrant 1.16+). It
+TurboQuant is Qdrant's fast, data-oblivious quantization (Qdrant 1.18+). It
 encodes each component down to a handful of bits without a training pass.
 
 | Field | Type | Description |
