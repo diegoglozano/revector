@@ -23,7 +23,7 @@ use testcontainers::GenericImage;
 /// README — they are bumped together. Override with `REVECTOR_QDRANT_VERSION`
 /// to probe a different server without touching code; the scheduled
 /// `qdrant-compat` CI job points this at `latest` to catch new releases early.
-const SUPPORTED_QDRANT_VERSION: &str = "v1.18.2";
+const SUPPORTED_QDRANT_VERSION: &str = "v1.19.0";
 
 /// Boot a Qdrant container and return it alongside a ready config.
 ///
@@ -49,7 +49,16 @@ async fn boot() -> Option<(Option<testcontainers::ContainerAsync<GenericImage>>,
 
     let tag = std::env::var("REVECTOR_QDRANT_VERSION")
         .unwrap_or_else(|_| SUPPORTED_QDRANT_VERSION.to_string());
-    let container = match GenericImage::new("qdrant/qdrant", tag.as_str())
+    boot_tag(&tag).await
+}
+
+/// Boot a specific Qdrant image tag, bypassing the pin and the
+/// `REVECTOR_TEST_URL` escape hatch. Used by tests that need a *particular*
+/// server version rather than whichever one the suite is pinned to.
+async fn boot_tag(
+    tag: &str,
+) -> Option<(Option<testcontainers::ContainerAsync<GenericImage>>, Config)> {
+    let container = match GenericImage::new("qdrant/qdrant", tag)
         .with_exposed_port(6334.tcp())
         .with_wait_for(WaitFor::message_on_stdout("Actix runtime found"))
         .start()
@@ -262,6 +271,9 @@ up:
         keywords: {}
 "#;
 
+// Reads the deprecated `on_disk` flag on purpose: the migration under test
+// declares it, and revector must keep sending it unchanged.
+#[allow(deprecated)]
 #[tokio::test]
 async fn create_collection_provisions_sparse_vectors() {
     let (_c, config, _lock) = boot_or_skip!();
@@ -451,3 +463,207 @@ async fn advisory_lock_blocks_concurrent_runs() {
     // A successful run releases the lock.
     assert!(tracker.read_lock().await.unwrap().is_none());
 }
+
+/// Qdrant 1.19 config surface, end to end: memory placement on the vector
+/// storage / HNSW graph / payload store, a TurboQuant-4 datatype, and a keyword
+/// index that opts into prefix matching.
+const MIG_1_19: &str = r#"
+revision: "0001_tiers"
+down_revision: null
+description: 1.19 memory tiers + prefix index
+up:
+  - op: create_collection
+    name: tiered
+    spec:
+      vectors:
+        "":
+          size: 8
+          distance: Cosine
+          memory: cold
+          hnsw_config:
+            m: 16
+            memory: cached
+      payload:
+        memory: cold
+  - op: create_payload_index
+    collection: tiered
+    field_name: sku
+    schema: keyword
+    params:
+      prefix: true
+      memory: cached
+"#;
+
+#[tokio::test]
+async fn applies_qdrant_1_19_memory_and_index_params() {
+    use qdrant_client::qdrant::{payload_index_params::IndexParams, Memory as QMemory};
+
+    let (_c, config, _lock) = boot_or_skip!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_1_19)]);
+
+    let qdrant = client::connect(&config).unwrap();
+    cleanup(&qdrant, &["tiered"]).await;
+    let chain = resolve_chain(dir);
+
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    runner.up(None).await.unwrap();
+
+    let info = qdrant
+        .collection_info("tiered")
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    let collection_config = info.config.clone().unwrap();
+    let params = collection_config.params.clone().unwrap();
+
+    // Vector storage and payload store landed in the declared tiers.
+    let vectors = match params.vectors_config.unwrap().config.unwrap() {
+        qdrant_client::qdrant::vectors_config::Config::Params(p) => p,
+        other => panic!("expected a single unnamed vector, got {other:?}"),
+    };
+    assert_eq!(vectors.memory, Some(QMemory::Cold as i32));
+    assert_eq!(
+        vectors.hnsw_config.and_then(|h| h.memory),
+        Some(QMemory::Cached as i32)
+    );
+    assert_eq!(
+        params.payload.and_then(|p| p.memory),
+        Some(QMemory::Cold as i32)
+    );
+
+    // The keyword index carries the prefix marker that enables prefix filters.
+    let schema = info
+        .payload_schema
+        .get("sku")
+        .expect("sku index should exist");
+    match schema
+        .params
+        .clone()
+        .and_then(|p| p.index_params)
+        .expect("index params echoed back")
+    {
+        IndexParams::KeywordIndexParams(k) => {
+            assert!(k.prefix.is_some(), "prefix matching should be enabled");
+            assert_eq!(k.memory, Some(QMemory::Cached as i32));
+        }
+        other => panic!("expected keyword index params, got {other:?}"),
+    }
+
+    // `diff` sees the declared placement as satisfied.
+    let spec: CollectionSpec = serde_yaml::from_str(
+        r#"
+vectors:
+  "":
+    size: 8
+    distance: Cosine
+    memory: cold
+payload:
+  memory: cold
+"#,
+    )
+    .unwrap();
+    let report = diff::diff_collection(&qdrant, "tiered", &spec)
+        .await
+        .unwrap();
+    assert!(
+        report.in_sync(),
+        "expected in sync, got {:?}",
+        report.differences
+    );
+
+    // …and reports drift when a different tier is declared.
+    let drifted: CollectionSpec = serde_yaml::from_str(
+        r#"
+vectors:
+  "":
+    size: 8
+    distance: Cosine
+    memory: cached
+"#,
+    )
+    .unwrap();
+    let report = diff::diff_collection(&qdrant, "tiered", &drifted)
+        .await
+        .unwrap();
+    assert!(report
+        .differences
+        .iter()
+        .any(|d| d.path == "vectors.<default>.memory"));
+
+    // Rolling back drops the index and the collection again.
+    runner.down(None, 1).await.unwrap();
+    assert!(!qdrant.collection_exists("tiered").await.unwrap());
+
+    cleanup(&qdrant, &["tiered"]).await;
+}
+
+/// The oldest server the guard is tested against. 1.18.x understands none of
+/// the 1.19 config surface, and — crucially — ignores those fields instead of
+/// rejecting them, which is exactly the silent failure the check exists to stop.
+const OLD_QDRANT_VERSION: &str = "v1.18.3";
+
+/// Running a 1.19-only migration against a 1.18 server must fail up front, not
+/// "succeed" with the setting dropped and the revision recorded as applied.
+#[tokio::test]
+async fn refuses_1_19_fields_on_an_older_server() {
+    let _guard = test_lock().lock().await;
+    // This test needs a *specific* server version, so it can't honour the
+    // shared-server escape hatch.
+    if std::env::var("REVECTOR_TEST_URL").is_ok()
+        || std::env::var("REVECTOR_QDRANT_VERSION").is_ok()
+    {
+        eprintln!("skipping old-server test: it pins its own Qdrant version");
+        return;
+    }
+    let (_c, config) = match boot_tag(OLD_QDRANT_VERSION).await {
+        Some(v) => v,
+        None => return,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_1), ("0002.yaml", MIG_1_19_ONLY)]);
+
+    let qdrant = client::connect(&config).unwrap();
+    let chain = resolve_chain(dir);
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+
+    let err = runner
+        .up(None)
+        .await
+        .expect_err("a 1.19-only migration must not run against 1.18");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("too old") && msg.contains("1.19.0") && msg.contains("memory"),
+        "unhelpful error: {msg}"
+    );
+
+    // Nothing ran: the pre-flight rejects the whole plan, including the
+    // 1.18-compatible revision ahead of the offending one.
+    assert!(!qdrant.collection_exists("products").await.unwrap());
+    let status = runner.status().await.unwrap();
+    assert!(status.revisions.iter().all(|r| !r.applied));
+
+    // The same chain minus the 1.19 field applies cleanly on the old server —
+    // the guard gates the field, not the tool.
+    write_migrations(dir, &[("0002.yaml", MIG_2)]);
+    let chain = resolve_chain(dir);
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    let applied = runner.up(None).await.unwrap();
+    assert_eq!(applied.revisions, vec!["0001_products", "0002_index"]);
+}
+
+const MIG_1_19_ONLY: &str = r#"
+revision: "0002_index"
+down_revision: "0001_products"
+description: retier the payload store (Qdrant 1.19+)
+up:
+  - op: update_collection
+    collection: products
+    vectors:
+      "":
+        memory: cold
+"#;

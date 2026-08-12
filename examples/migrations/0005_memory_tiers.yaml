@@ -1,0 +1,55 @@
+revision: "0005_memory_tiers"
+down_revision: "0004_turboquant"
+description: move cold data off RAM and add a prefix-searchable sku index
+
+# Qdrant 1.19 replaced the per-component `on_disk` / `always_ram` booleans with
+# an explicit placement tier. The data is on disk either way — `memory` only
+# says how much of it Qdrant keeps cached:
+#
+#   cold    not pre-loaded; cached lazily as it is used
+#   cached  pre-loaded on start, evictable under memory pressure
+#   pinned  held in RAM, never evicted (not allowed for dense vectors/payload)
+up:
+  - op: update_collection
+    collection: products
+    # The image vectors are queried rarely — let them fall out of cache, but
+    # keep the graph that finds them warm.
+    vectors:
+      image:
+        memory: cold
+        hnsw_config:
+          memory: cached
+    payload:
+      memory: cold
+
+  # Prefix matching is a 1.19 keyword-index feature: it has to be declared when
+  # the index is built, so it belongs in a migration rather than in a query.
+  - op: create_payload_index
+    collection: products
+    field_name: sku
+    schema: keyword
+    params:
+      prefix: true
+      memory: cached
+
+# `update_collection` never auto-reverses (the previous values aren't recorded),
+# so the downgrade spells out the tiers this collection had before. The index
+# drop *would* auto-reverse, but an explicit `down` block replaces the whole
+# auto-inversion, so it is listed here too.
+down:
+  - op: delete_payload_index
+    collection: products
+    field_name: sku
+    schema: keyword
+    params:
+      prefix: true
+      memory: cached
+  - op: update_collection
+    collection: products
+    vectors:
+      image:
+        memory: cached
+        hnsw_config:
+          memory: cached
+    payload:
+      memory: cached
