@@ -32,7 +32,7 @@ specific Qdrant server line, kept in lockstep with the `qdrant-client` crate:
 
 | revector | `qdrant-client` crate | Qdrant server (tested) |
 |----------|-----------------------|------------------------|
-| 0.5.x (unreleased) | 1.19        | 1.19.x (CI runs `v1.19.0`) |
+| 0.5.x    | 1.19                  | 1.19.x (CI runs `v1.19.0`) |
 | 0.4.x    | 1.18                  | 1.18.x (CI runs `v1.18.2`) |
 
 **Running against an older server.** revector isn't locked to the pinned

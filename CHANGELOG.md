@@ -6,6 +6,8 @@ All notable changes to revector are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-12
+
 ### Added
 - **Qdrant 1.19 support.** The `qdrant-client` dependency moves to 1.19 and the
   integration suite is pinned to server `v1.19.0`. revector 0.4.x does not build
@@ -103,6 +105,8 @@ All notable changes to revector are documented here. The format is based on
 - Commands: `init`, `new`, `status`, `up`, `down`, `to`, `diff`.
 - Distribution via cargo-dist (binaries + installers), crates.io, and Homebrew.
 
+[0.5.0]: https://github.com/diegoglozano/revector/releases/tag/v0.5.0
+[0.4.0]: https://github.com/diegoglozano/revector/releases/tag/v0.4.0
 [0.3.0]: https://github.com/diegoglozano/revector/releases/tag/v0.3.0
 [0.2.0]: https://github.com/diegoglozano/revector/releases/tag/v0.2.0
 [0.1.0]: https://github.com/diegoglozano/revector/releases/tag/v0.1.0
