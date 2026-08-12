@@ -35,6 +35,16 @@ specific Qdrant server line, kept in lockstep with the `qdrant-client` crate:
 | 0.5.x (unreleased) | 1.19        | 1.19.x (CI runs `v1.19.0`) |
 | 0.4.x    | 1.18                  | 1.18.x (CI runs `v1.18.2`) |
 
+**Running against an older server.** revector still talks to earlier 1.x
+servers: a migration that doesn't use newer fields sends exactly the same
+request it always did. Fields a server predates are dropped by gRPC rather than
+rejected, so a 1.19-only setting (`memory:`, the collection `payload:` block,
+`params.prefix`) is a **silent no-op** on a 1.18 server, and `revector diff`
+will keep reporting it as drift because the server can't apply or echo it back.
+The exception is `datatype: turbo4`, which the server rejects outright below
+v1.18.2. Keep 1.19-only fields out of migrations you intend to run against
+older servers.
+
 **How this stays current.** A weekly
 [`qdrant-compat`](.github/workflows/qdrant-compat.yml) CI job re-runs the full
 integration suite against `qdrant/qdrant:latest`. When a new Qdrant version ships

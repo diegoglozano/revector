@@ -15,7 +15,9 @@ pub fn connect(config: &Config) -> Result<Qdrant> {
         builder = builder.api_key(key.clone());
     }
     // Skip the client/server version compatibility check: revector targets the
-    // documented v1.18 API surface and should run against newer servers too.
+    // documented v1.19 API surface and should run against newer servers too.
+    // Older servers work as well — they ignore the 1.19-only fields a migration
+    // may declare (see the compatibility notes in the README).
     builder = builder.skip_compatibility_check();
     Ok(builder.build()?)
 }
