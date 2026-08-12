@@ -35,15 +35,24 @@ specific Qdrant server line, kept in lockstep with the `qdrant-client` crate:
 | 0.5.x (unreleased) | 1.19        | 1.19.x (CI runs `v1.19.0`) |
 | 0.4.x    | 1.18                  | 1.18.x (CI runs `v1.18.2`) |
 
-**Running against an older server.** revector still talks to earlier 1.x
-servers: a migration that doesn't use newer fields sends exactly the same
-request it always did. Fields a server predates are dropped by gRPC rather than
-rejected, so a 1.19-only setting (`memory:`, the collection `payload:` block,
-`params.prefix`) is a **silent no-op** on a 1.18 server, and `revector diff`
-will keep reporting it as drift because the server can't apply or echo it back.
-The exception is `datatype: turbo4`, which the server rejects outright below
-v1.18.2. Keep 1.19-only fields out of migrations you intend to run against
-older servers.
+**Running against an older server.** revector isn't locked to the pinned
+version — a migration that only uses fields your server already understands
+runs fine on an older 1.x. What sets the floor is the *fields a migration
+declares*, not the revector release:
+
+| Field | Minimum Qdrant server |
+|-------|----------------------|
+| `memory:` (any component), collection `payload:`, `params.prefix`, `params.stemmer: disabled` | 1.19.0 |
+| `datatype: turbo4` | 1.18.2 |
+| `create_vector` / `delete_vector` | 1.18.0 |
+| everything else | the version that introduced it |
+
+revector enforces this before it changes anything: `up` and `down` read the
+server version and refuse a plan the server is too old for, naming the field
+and the revision. That check exists because gRPC *drops* fields a server
+predates instead of rejecting them — without it, a 1.19-only setting applied to
+a 1.18 server would silently evaporate while the revision was recorded as
+applied, and upgrading the server later would never reapply it.
 
 **How this stays current.** A weekly
 [`qdrant-compat`](.github/workflows/qdrant-compat.yml) CI job re-runs the full

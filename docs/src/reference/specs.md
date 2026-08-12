@@ -187,6 +187,13 @@ a file written against Qdrant 1.18 keeps its exact meaning.
 
 Qdrant rejects `pinned` for dense vector storage and for the payload store.
 
+`memory` needs a Qdrant 1.19 server. Declaring it against an older one would be
+a *silent* no-op — gRPC drops fields a server predates rather than rejecting
+them — so `up` and `down` check the live server version first and refuse the
+run, naming the field and revision. The same guard covers the collection
+`payload:` block, `params.prefix`, `params.stemmer: disabled`, and
+`datatype: turbo4` (which needs 1.18.2).
+
 ## `PayloadStorageSpec`
 
 Payload storage configuration (Qdrant 1.19+) — the successor to

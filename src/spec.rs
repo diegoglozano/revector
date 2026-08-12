@@ -11,6 +11,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::version::{self, require, VersionRequirement};
 
 /// Distance metric for a vector field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -468,4 +469,132 @@ pub struct CollectionSpec {
     /// Payload storage configuration (Qdrant 1.19+).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<PayloadStorageSpec>,
+}
+
+// --- Minimum server version -------------------------------------------------
+//
+// Each spec reports the oldest Qdrant that understands the fields it sets, so
+// the runner can refuse before a newer-than-the-server setting is silently
+// dropped on the wire. See [`crate::version`] for why this matters.
+
+impl VectorSpec {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        if self.memory.is_some() {
+            require(
+                out,
+                version::MEMORY_PLACEMENT,
+                format!("`memory` on {path}"),
+            );
+        }
+        if self.datatype == Some(Datatype::Turbo4) {
+            require(
+                out,
+                version::TURBO4_DATATYPE,
+                format!("`datatype: turbo4` on {path}"),
+            );
+        }
+        if let Some(h) = &self.hnsw_config {
+            h.version_requirements(&format!("{path}.hnsw_config"), out);
+        }
+        if let Some(q) = &self.quantization_config {
+            q.version_requirements(&format!("{path}.quantization_config"), out);
+        }
+    }
+}
+
+impl HnswConfigSpec {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        if self.memory.is_some() {
+            require(
+                out,
+                version::MEMORY_PLACEMENT,
+                format!("`memory` on {path}"),
+            );
+        }
+    }
+}
+
+impl SparseVectorSpec {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        if self.memory.is_some() {
+            require(
+                out,
+                version::MEMORY_PLACEMENT,
+                format!("`memory` on {path}"),
+            );
+        }
+    }
+}
+
+impl QuantizationSpec {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        let memory = match self {
+            QuantizationSpec::Scalar(s) => s.memory,
+            QuantizationSpec::Product(p) => p.memory,
+            QuantizationSpec::Binary(b) => b.memory,
+            QuantizationSpec::Turboquant(t) => t.memory,
+            QuantizationSpec::Disabled => None,
+        };
+        if memory.is_some() {
+            require(
+                out,
+                version::MEMORY_PLACEMENT,
+                format!("`memory` on {path}"),
+            );
+        }
+    }
+}
+
+impl PayloadStorageSpec {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        // The block itself is 1.19-only, so its mere presence is the requirement.
+        require(out, version::MEMORY_PLACEMENT, format!("`{path}` block"));
+    }
+}
+
+impl PayloadIndexParamsSpec {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        if self.memory.is_some() {
+            require(
+                out,
+                version::MEMORY_PLACEMENT,
+                format!("`memory` on {path}"),
+            );
+        }
+        if self.prefix == Some(true) {
+            require(
+                out,
+                version::MEMORY_PLACEMENT,
+                format!("`prefix` on {path}"),
+            );
+        }
+        if self.stemmer == Some(StemmerSpec::Disabled) {
+            require(
+                out,
+                version::MEMORY_PLACEMENT,
+                format!("`stemmer: disabled` on {path}"),
+            );
+        }
+    }
+}
+
+impl CollectionSpec {
+    pub fn version_requirements(&self, out: &mut Vec<VersionRequirement>) {
+        for (name, v) in &self.vectors {
+            let display = if name.is_empty() { "<default>" } else { name };
+            v.version_requirements(&format!("vectors.{display}"), out);
+        }
+        for (name, s) in &self.sparse_vectors {
+            s.version_requirements(&format!("sparse_vectors.{name}"), out);
+        }
+        if let Some(h) = &self.hnsw_config {
+            h.version_requirements("hnsw_config", out);
+        }
+        if let Some(q) = &self.quantization_config {
+            q.version_requirements("quantization_config", out);
+        }
+        if let Some(p) = &self.payload {
+            p.version_requirements("payload", out);
+        }
+    }
 }

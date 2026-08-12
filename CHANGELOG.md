@@ -29,8 +29,22 @@ All notable changes to revector are documented here. The format is based on
   parsed, so `revector validate` catches them offline.
 - `diff` compares declared memory placement for vectors, HNSW graphs, sparse
   indexes, and the payload store.
+- **Minimum-server check.** `up` and `down` now read the live server version and
+  refuse a plan the server is too old to apply, naming the offending field and
+  revision (`Error::ServerTooOld`). gRPC drops fields a server predates instead
+  of rejecting them, so without this a 1.19-only setting applied to a 1.18
+  server would evaporate silently *and* be recorded as applied — with the
+  checksum guard then blocking a retry. Only fields that actually reach the wire
+  count, so specs the executor drops by design (per-vector tuning at
+  `create_vector` time, `params` on a payload-index delete) don't raise the
+  floor. An unparseable server version warns rather than blocks.
+- `revector` still runs against older 1.x servers; the README documents which
+  field needs which server version.
 
 ### Changed
+- `down` resolves the whole rollback plan before executing any of it, so an
+  irreversible step (or one the server is too old for) fails the run instead of
+  leaving it half rolled back.
 - `create_vector` now warns when a spec declares `on_disk` or `memory`, which
   Qdrant's add-vector API cannot accept — previously `on_disk` was dropped
   silently. Apply it with a follow-up `update_collection`, as with

@@ -71,6 +71,18 @@ pub enum Error {
     #[error("exec hook failed (exit {code}): {command}")]
     ExecHook { command: String, code: i32 },
 
+    /// A migration declares a field the connected server is too old to accept.
+    ///
+    /// Qdrant drops unknown proto fields silently, so without this check the
+    /// setting would vanish while the revision was recorded as applied.
+    #[error("qdrant server {found} is too old for revision {revision}: {feature} requires server {required} or newer (upgrade Qdrant, or drop the field from the migration)")]
+    ServerTooOld {
+        revision: String,
+        feature: String,
+        required: String,
+        found: String,
+    },
+
     /// A migration operation references something that is missing or invalid.
     #[error("invalid operation: {0}")]
     InvalidOperation(String),

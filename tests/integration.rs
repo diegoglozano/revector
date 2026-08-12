@@ -49,7 +49,16 @@ async fn boot() -> Option<(Option<testcontainers::ContainerAsync<GenericImage>>,
 
     let tag = std::env::var("REVECTOR_QDRANT_VERSION")
         .unwrap_or_else(|_| SUPPORTED_QDRANT_VERSION.to_string());
-    let container = match GenericImage::new("qdrant/qdrant", tag.as_str())
+    boot_tag(&tag).await
+}
+
+/// Boot a specific Qdrant image tag, bypassing the pin and the
+/// `REVECTOR_TEST_URL` escape hatch. Used by tests that need a *particular*
+/// server version rather than whichever one the suite is pinned to.
+async fn boot_tag(
+    tag: &str,
+) -> Option<(Option<testcontainers::ContainerAsync<GenericImage>>, Config)> {
+    let container = match GenericImage::new("qdrant/qdrant", tag)
         .with_exposed_port(6334.tcp())
         .with_wait_for(WaitFor::message_on_stdout("Actix runtime found"))
         .start()
@@ -590,3 +599,71 @@ vectors:
 
     cleanup(&qdrant, &["tiered"]).await;
 }
+
+/// The oldest server the guard is tested against. 1.18.x understands none of
+/// the 1.19 config surface, and — crucially — ignores those fields instead of
+/// rejecting them, which is exactly the silent failure the check exists to stop.
+const OLD_QDRANT_VERSION: &str = "v1.18.3";
+
+/// Running a 1.19-only migration against a 1.18 server must fail up front, not
+/// "succeed" with the setting dropped and the revision recorded as applied.
+#[tokio::test]
+async fn refuses_1_19_fields_on_an_older_server() {
+    let _guard = test_lock().lock().await;
+    // This test needs a *specific* server version, so it can't honour the
+    // shared-server escape hatch.
+    if std::env::var("REVECTOR_TEST_URL").is_ok()
+        || std::env::var("REVECTOR_QDRANT_VERSION").is_ok()
+    {
+        eprintln!("skipping old-server test: it pins its own Qdrant version");
+        return;
+    }
+    let (_c, config) = match boot_tag(OLD_QDRANT_VERSION).await {
+        Some(v) => v,
+        None => return,
+    };
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_1), ("0002.yaml", MIG_1_19_ONLY)]);
+
+    let qdrant = client::connect(&config).unwrap();
+    let chain = resolve_chain(dir);
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+
+    let err = runner
+        .up(None)
+        .await
+        .expect_err("a 1.19-only migration must not run against 1.18");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("too old") && msg.contains("1.19.0") && msg.contains("memory"),
+        "unhelpful error: {msg}"
+    );
+
+    // Nothing ran: the pre-flight rejects the whole plan, including the
+    // 1.18-compatible revision ahead of the offending one.
+    assert!(!qdrant.collection_exists("products").await.unwrap());
+    let status = runner.status().await.unwrap();
+    assert!(status.revisions.iter().all(|r| !r.applied));
+
+    // The same chain minus the 1.19 field applies cleanly on the old server —
+    // the guard gates the field, not the tool.
+    write_migrations(dir, &[("0002.yaml", MIG_2)]);
+    let chain = resolve_chain(dir);
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    let applied = runner.up(None).await.unwrap();
+    assert_eq!(applied.revisions, vec!["0001_products", "0002_index"]);
+}
+
+const MIG_1_19_ONLY: &str = r#"
+revision: "0002_index"
+down_revision: "0001_products"
+description: retier the payload store (Qdrant 1.19+)
+up:
+  - op: update_collection
+    collection: products
+    vectors:
+      "":
+        memory: cold
+"#;

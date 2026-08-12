@@ -6,6 +6,7 @@ use qdrant_client::Qdrant;
 
 use crate::config::Config;
 use crate::error::Result;
+use crate::version::ServerVersion;
 
 /// Connect to Qdrant using the resolved [`Config`].
 pub fn connect(config: &Config) -> Result<Qdrant> {
@@ -20,4 +21,14 @@ pub fn connect(config: &Config) -> Result<Qdrant> {
     // may declare (see the compatibility notes in the README).
     builder = builder.skip_compatibility_check();
     Ok(builder.build()?)
+}
+
+/// Ask the server what version it runs.
+///
+/// Returns `None` when the reported string doesn't parse — callers treat that
+/// as "can't tell" and carry on rather than blocking a migration over an
+/// unrecognised build string.
+pub async fn server_version(client: &Qdrant) -> Result<Option<ServerVersion>> {
+    let reply = client.health_check().await?;
+    Ok(ServerVersion::parse(&reply.version))
 }

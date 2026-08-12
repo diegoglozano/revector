@@ -692,3 +692,138 @@ up:
         .to_string();
     assert!(err.contains("prefixx"), "{err}");
 }
+
+// --- Minimum server version -------------------------------------------------
+
+/// Helper: the requirements a migration's `up` ops carry, as (version, feature).
+fn up_requirements(m: &Migration) -> Vec<(String, String)> {
+    m.file
+        .up
+        .iter()
+        .flat_map(|op| op.version_requirements())
+        .map(|r| (r.version.to_string(), r.feature))
+        .collect()
+}
+
+/// Declaring a 1.19-only field raises the minimum server version, so the runner
+/// can refuse instead of letting the field be dropped on the wire.
+#[test]
+fn memory_placement_requires_a_1_19_server() {
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: create_collection
+    name: docs
+    spec:
+      vectors:
+        "":
+          size: 8
+          distance: Dot
+          memory: cold
+"#);
+    let reqs = up_requirements(&m);
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].0, "1.19.0");
+    assert!(reqs[0].1.contains("memory"), "{:?}", reqs[0]);
+}
+
+/// The TurboQuant datatype landed server-side in 1.18.2, ahead of the rest of
+/// the 1.19 surface — the requirement tracks the server, not the client crate.
+#[test]
+fn turbo4_requires_1_18_2_not_1_19() {
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: create_collection
+    name: docs
+    spec:
+      vectors:
+        "":
+          size: 8
+          distance: Dot
+          datatype: turbo4
+"#);
+    assert_eq!(up_requirements(&m)[0].0, "1.18.2");
+}
+
+/// A migration that declares nothing new imposes nothing, so it still runs
+/// against older servers.
+#[test]
+fn plain_migrations_have_no_version_floor() {
+    assert!(up_requirements(&mig(M1)).is_empty());
+    assert!(up_requirements(&mig(M2)).is_empty());
+}
+
+/// Only what reaches the wire counts. Qdrant's add-vector API takes neither
+/// placement nor tuning — revector warns and drops them — so they must not
+/// raise the floor for a `create_vector` step.
+#[test]
+fn create_vector_ignores_fields_the_api_cannot_accept() {
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: create_vector
+    collection: products
+    name: image
+    spec:
+      size: 8
+      distance: Dot
+      memory: cold
+      hnsw_config:
+        memory: cached
+"#);
+    assert!(
+        up_requirements(&m).is_empty(),
+        "dropped fields must not gate the server version: {:?}",
+        up_requirements(&m)
+    );
+}
+
+/// Same rule for a payload-index delete: its `params` exist only to rebuild the
+/// index on the way back up, and are never sent by the delete itself.
+#[test]
+fn delete_payload_index_params_do_not_gate_the_server() {
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: delete_payload_index
+    collection: products
+    field_name: sku
+    schema: keyword
+    params:
+      prefix: true
+      memory: cached
+"#);
+    assert!(up_requirements(&m).is_empty());
+
+    // But recreating it on rollback does need the newer server.
+    let down = m.downgrade_ops().unwrap();
+    let reqs: Vec<_> = down[0].version_requirements();
+    assert_eq!(reqs.len(), 2, "{reqs:?}");
+    assert!(reqs.iter().all(|r| r.version.to_string() == "1.19.0"));
+}
+
+/// `update_collection` sends its diff whole, so every 1.19 field in it counts.
+#[test]
+fn update_collection_requirements_cover_vectors_and_payload() {
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: update_collection
+    collection: docs
+    vectors:
+      image:
+        memory: cached
+    payload:
+      memory: cold
+"#);
+    let reqs = up_requirements(&m);
+    assert_eq!(reqs.len(), 2, "{reqs:?}");
+    assert!(reqs.iter().any(|(_, f)| f.contains("vectors.image")));
+    assert!(reqs.iter().any(|(_, f)| f.contains("payload")));
+}

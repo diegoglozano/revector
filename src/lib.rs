@@ -26,6 +26,7 @@
 //! - [`tracking`] — applied-revision bookkeeping inside Qdrant.
 //! - [`runner`] — up/down/to/status orchestration with checksum safety.
 //! - [`diff`] — declaration-driven drift detection.
+//! - [`version`] — server version parsing and per-operation minimums.
 
 pub mod chain;
 pub mod cli;
@@ -42,6 +43,7 @@ pub mod runner;
 pub mod scaffold;
 pub mod spec;
 pub mod tracking;
+pub mod version;
 
 pub use config::Config;
 pub use error::{Error, Result};
