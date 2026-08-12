@@ -20,7 +20,9 @@ up:
       indexing_threshold: 20000
     vectors:                       # patch existing named-vector params
       image:
-        on_disk: true
+        memory: cold               # move the vector storage (Qdrant 1.19+)
+    payload:
+      memory: cold                 # move the payload store (Qdrant 1.19+)
 
 # update_collection is not auto-reversible (previous values aren't recorded).
 # Spell out the inverse explicitly:
@@ -38,15 +40,16 @@ down:
 | `hnsw_config` | [`HnswConfigSpec`](../specs.md#hnswconfigspec) | no | Override collection-level HNSW params. |
 | `quantization_config` | [`QuantizationSpec`](../specs.md#quantizationspec) | no | Set or replace quantization (`scalar` / `product` / `binary` / `turboquant` / `disabled`). |
 | `optimizers_config` | [`OptimizersConfigSpec`](../specs.md#optimizersconfigspec) | no | Tune optimizer thresholds. |
-| `vectors` | map<name, [`VectorParamsDiff`](../specs.md#vectorparamsdiff)> | no | Patch params of existing named vectors (`on_disk`, `hnsw_config`, `quantization_config`). |
+| `vectors` | map<name, [`VectorParamsDiff`](../specs.md#vectorparamsdiff)> | no | Patch params of existing named vectors (`on_disk`, `memory`, `hnsw_config`, `quantization_config`). |
+| `payload` | [`PayloadStorageSpec`](../specs.md#payloadstoragespec) | no | Move the payload storage between memory tiers (Qdrant 1.19+). |
 
-At least one of those four fields must be set, otherwise revector refuses the
+At least one of those five fields must be set, otherwise revector refuses the
 op as a no-op.
 
 > **Note.** `size` and `distance` of a named vector are immutable. Per-vector
-> `hnsw_config` / `quantization_config` cannot be set at `create_vector` time
-> either (Qdrant's add-vector API doesn't accept them); apply them with a
-> follow-up `update_collection` step as shown above.
+> `hnsw_config` / `quantization_config` / `memory` cannot be set at
+> `create_vector` time either (Qdrant's add-vector API doesn't accept them);
+> apply them with a follow-up `update_collection` step as shown above.
 
 ## Reversibility
 

@@ -23,6 +23,7 @@ uses it to reconstruct the matching `create_payload_index`.
 | `collection` | string | yes | Collection that holds the index. |
 | `field_name` | string | yes | Payload field whose index to drop. |
 | `schema` | [`PayloadSchemaType`](../specs.md#payloadschematype) | no | Original field schema. Required for auto-reversibility. |
+| `params` | [`PayloadIndexParamsSpec`](../specs.md#payloadindexparamsspec) | no | Params to recreate the index with on rollback. Only meaningful alongside `schema:`. |
 
 ## Reversibility
 

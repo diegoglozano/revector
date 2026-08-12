@@ -82,10 +82,14 @@ impl<'a> Executor<'a> {
                 if let Some(dt) = spec.datatype {
                     config = config.datatype(qdrant_client::qdrant::Datatype::from(dt) as i32);
                 }
-                if spec.hnsw_config.is_some() || spec.quantization_config.is_some() {
+                if spec.hnsw_config.is_some()
+                    || spec.quantization_config.is_some()
+                    || spec.memory.is_some()
+                    || spec.on_disk.is_some()
+                {
                     warn!(
-                        "per-vector hnsw/quantization on `{collection}.{name}` is ignored on add; \
-                         set it with a follow-up update_collection step"
+                        "per-vector hnsw/quantization/memory on `{collection}.{name}` is ignored \
+                         on add; set it with a follow-up update_collection step"
                     );
                 }
                 self.client
@@ -115,17 +119,19 @@ impl<'a> Executor<'a> {
                 collection,
                 field_name,
                 schema,
+                params,
             } => {
-                self.client
-                    .create_field_index(
-                        CreateFieldIndexCollectionBuilder::new(
-                            collection,
-                            field_name,
-                            (*schema).into(),
-                        )
-                        .wait(true),
-                    )
-                    .await?;
+                let mut builder = CreateFieldIndexCollectionBuilder::new(
+                    collection,
+                    field_name,
+                    (*schema).into(),
+                )
+                .wait(true);
+                if let Some(params) = params {
+                    builder =
+                        builder.field_index_params(convert::payload_index_params(*schema, params));
+                }
+                self.client.create_field_index(builder).await?;
             }
             Operation::DeletePayloadIndex {
                 collection,
@@ -195,6 +201,15 @@ impl<'a> Executor<'a> {
                     ),
                 ),
             });
+            touched = true;
+        }
+        if let Some(payload) = &op.payload {
+            builder = builder.params(convert::collection_params_diff(
+                None,
+                None,
+                None,
+                Some(payload),
+            ));
             touched = true;
         }
 

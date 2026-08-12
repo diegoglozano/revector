@@ -6,16 +6,23 @@
 //! one file.
 
 use qdrant_client::qdrant::{
-    self, quantization_config, quantization_config_diff, vectors_config, BinaryQuantization,
-    CollectionParamsDiff, CreateCollectionBuilder, Datatype as QDatatype, Distance as QDistance,
-    FieldType, HnswConfigDiff, OptimizersConfigDiff, ProductQuantization, QuantizationConfig,
-    ScalarQuantization, SparseIndexConfig, SparseVectorConfig, SparseVectorParams,
-    TurboQuantization, VectorParams, VectorParamsDiff, VectorsConfig,
+    self, quantization_config, quantization_config_diff, stemming_algorithm, vectors_config,
+    BinaryQuantization, BoolIndexParams, CollectionParamsDiff, CreateCollectionBuilder,
+    Datatype as QDatatype, DatetimeIndexParams, DisabledStemmer, Distance as QDistance, FieldType,
+    FloatIndexParams, GeoIndexParams, HnswConfigDiff, IntegerIndexParams, KeywordIndexParams,
+    KeywordPrefixParams, Memory as QMemory, OptimizersConfigDiff, PayloadStorageParams,
+    ProductQuantization, QuantizationConfig, ScalarQuantization, SnowballParams, SparseIndexConfig,
+    SparseVectorConfig, SparseVectorParams, StemmingAlgorithm, StopwordsSet, TextIndexParams,
+    TokenizerType, TurboQuantization, UuidIndexParams, VectorParams, VectorParamsDiff,
+    VectorsConfig,
 };
 
+use qdrant_client::qdrant::payload_index_params::IndexParams as QIndexParams;
+
 use crate::spec::{
-    CollectionSpec, Datatype, Distance, HnswConfigSpec, OptimizersConfigSpec, PayloadSchemaType,
-    QuantizationSpec, SparseVectorSpec, VectorSpec,
+    CollectionSpec, Datatype, Distance, HnswConfigSpec, Memory, OptimizersConfigSpec,
+    PayloadIndexParamsSpec, PayloadSchemaType, PayloadStorageSpec, QuantizationSpec,
+    SparseVectorSpec, StemmerSpec, StopwordsSpec, Tokenizer, VectorSpec,
 };
 
 impl From<Distance> for QDistance {
@@ -35,6 +42,61 @@ impl From<Datatype> for QDatatype {
             Datatype::Float32 => QDatatype::Float32,
             Datatype::Uint8 => QDatatype::Uint8,
             Datatype::Float16 => QDatatype::Float16,
+            Datatype::Turbo4 => QDatatype::Turbo4,
+        }
+    }
+}
+
+impl From<Memory> for QMemory {
+    fn from(m: Memory) -> Self {
+        match m {
+            Memory::Cold => QMemory::Cold,
+            Memory::Cached => QMemory::Cached,
+            Memory::Pinned => QMemory::Pinned,
+        }
+    }
+}
+
+/// Memory placement as the proto enum discriminant, or `None` when undeclared
+/// (leaving the server to apply its own default).
+fn memory(m: Option<Memory>) -> Option<i32> {
+    m.map(|m| QMemory::from(m) as i32)
+}
+
+impl From<Tokenizer> for TokenizerType {
+    fn from(t: Tokenizer) -> Self {
+        match t {
+            Tokenizer::Prefix => TokenizerType::Prefix,
+            Tokenizer::Whitespace => TokenizerType::Whitespace,
+            Tokenizer::Word => TokenizerType::Word,
+            Tokenizer::Multilingual => TokenizerType::Multilingual,
+        }
+    }
+}
+
+impl From<&StopwordsSpec> for StopwordsSet {
+    fn from(s: &StopwordsSpec) -> Self {
+        StopwordsSet {
+            languages: s.languages.clone(),
+            custom: s.custom.clone(),
+        }
+    }
+}
+
+impl From<&StemmerSpec> for StemmingAlgorithm {
+    fn from(s: &StemmerSpec) -> Self {
+        let params = match s {
+            StemmerSpec::Snowball(language) => {
+                stemming_algorithm::StemmingParams::Snowball(SnowballParams {
+                    language: language.clone(),
+                })
+            }
+            StemmerSpec::Disabled => {
+                stemming_algorithm::StemmingParams::Disabled(DisabledStemmer {})
+            }
+        };
+        StemmingAlgorithm {
+            stemming_params: Some(params),
         }
     }
 }
@@ -55,6 +117,12 @@ impl From<PayloadSchemaType> for FieldType {
 }
 
 impl From<&HnswConfigSpec> for HnswConfigDiff {
+    // `on_disk` is deprecated in favour of `memory` since Qdrant 1.19, but we
+    // keep forwarding it verbatim: a migration committed against an older
+    // release must keep meaning exactly what it meant when it was written, and
+    // 1.18 servers only understand the boolean. Same reasoning applies to every
+    // other `allow(deprecated)` in this file.
+    #[allow(deprecated)]
     fn from(h: &HnswConfigSpec) -> Self {
         HnswConfigDiff {
             m: h.m,
@@ -63,6 +131,7 @@ impl From<&HnswConfigSpec> for HnswConfigDiff {
             max_indexing_threads: h.max_indexing_threads,
             on_disk: h.on_disk,
             payload_m: h.payload_m,
+            memory: memory(h.memory),
             ..Default::default()
         }
     }
@@ -110,6 +179,7 @@ fn turbo_quant_bits(s: &str) -> Option<i32> {
 /// Build the `quantization_config::Quantization` oneof used on create.
 /// Returns `None` for [`QuantizationSpec::Disabled`] — on create, disabled
 /// simply means "don't send any quantization".
+#[allow(deprecated)] // `always_ram`: see the note on `HnswConfigDiff::from`.
 pub fn quantization_oneof(q: &QuantizationSpec) -> Option<quantization_config::Quantization> {
     match q {
         QuantizationSpec::Scalar(s) => Some(quantization_config::Quantization::Scalar(
@@ -117,17 +187,20 @@ pub fn quantization_oneof(q: &QuantizationSpec) -> Option<quantization_config::Q
                 r#type: qdrant::QuantizationType::Int8 as i32,
                 quantile: s.quantile,
                 always_ram: s.always_ram,
+                memory: memory(s.memory),
             },
         )),
         QuantizationSpec::Product(p) => Some(quantization_config::Quantization::Product(
             ProductQuantization {
                 compression: compression_ratio(&p.compression),
                 always_ram: p.always_ram,
+                memory: memory(p.memory),
             },
         )),
         QuantizationSpec::Binary(b) => Some(quantization_config::Quantization::Binary(
             BinaryQuantization {
                 always_ram: b.always_ram,
+                memory: memory(b.memory),
                 ..Default::default()
             },
         )),
@@ -135,6 +208,7 @@ pub fn quantization_oneof(q: &QuantizationSpec) -> Option<quantization_config::Q
             TurboQuantization {
                 always_ram: t.always_ram,
                 bits: t.bits.as_deref().and_then(turbo_quant_bits),
+                memory: memory(t.memory),
             },
         )),
         QuantizationSpec::Disabled => None,
@@ -166,6 +240,7 @@ pub fn quantization_diff_oneof(q: &QuantizationSpec) -> quantization_config_diff
 }
 
 /// Convert a [`VectorSpec`] into proto [`VectorParams`].
+#[allow(deprecated)] // `on_disk`: see the note on `HnswConfigDiff::from`.
 pub fn vector_params(v: &VectorSpec) -> VectorParams {
     VectorParams {
         size: v.size,
@@ -179,6 +254,7 @@ pub fn vector_params(v: &VectorSpec) -> VectorParams {
         on_disk: v.on_disk,
         datatype: v.datatype.map(|d| QDatatype::from(d) as i32),
         multivector_config: None,
+        memory: memory(v.memory),
     }
 }
 
@@ -207,15 +283,17 @@ pub fn vectors_config(spec: &CollectionSpec) -> VectorsConfig {
 
 /// Convert a [`SparseVectorSpec`] into proto [`SparseVectorParams`].
 ///
-/// The spec's `on_disk` / `full_scan_threshold` map onto the sparse
+/// The spec's `on_disk` / `full_scan_threshold` / `memory` map onto the sparse
 /// [`SparseIndexConfig`]; we only attach an index when at least one is set so a
 /// bare `{}` sparse entry creates the vector with server defaults.
+#[allow(deprecated)] // `on_disk`: see the note on `HnswConfigDiff::from`.
 pub fn sparse_vector_params(s: &SparseVectorSpec) -> SparseVectorParams {
-    let index = if s.on_disk.is_some() || s.full_scan_threshold.is_some() {
+    let index = if s.on_disk.is_some() || s.full_scan_threshold.is_some() || s.memory.is_some() {
         Some(SparseIndexConfig {
             full_scan_threshold: s.full_scan_threshold,
             on_disk: s.on_disk,
             datatype: None,
+            memory: memory(s.memory),
         })
     } else {
         None
@@ -241,6 +319,7 @@ pub fn sparse_vectors_config(spec: &CollectionSpec) -> Option<SparseVectorConfig
 }
 
 /// Build a [`VectorParamsDiff`] for in-place vector param updates.
+#[allow(deprecated)] // `on_disk`: see the note on `HnswConfigDiff::from`.
 pub fn vector_params_diff(d: &crate::ops::VectorParamsDiff) -> VectorParamsDiff {
     VectorParamsDiff {
         hnsw_config: d.hnsw_config.as_ref().map(HnswConfigDiff::from),
@@ -250,6 +329,7 @@ pub fn vector_params_diff(d: &crate::ops::VectorParamsDiff) -> VectorParamsDiff 
             }
         }),
         on_disk: d.on_disk,
+        memory: memory(d.memory),
     }
 }
 
@@ -291,20 +371,115 @@ pub fn apply_collection_spec(
     if let Some(on_disk) = spec.on_disk_payload {
         builder = builder.on_disk_payload(on_disk);
     }
+    if let Some(p) = &spec.payload {
+        builder = builder.payload(payload_storage_params(p));
+    }
     builder
 }
 
+/// Convert a [`PayloadStorageSpec`] into proto [`PayloadStorageParams`]
+/// (Qdrant 1.19+).
+pub fn payload_storage_params(p: &PayloadStorageSpec) -> PayloadStorageParams {
+    PayloadStorageParams {
+        memory: memory(p.memory),
+    }
+}
+
 /// Build a [`CollectionParamsDiff`] from the patchable fields of a spec
-/// (replication / write-consistency / on-disk payload).
+/// (replication / write-consistency / payload storage).
+#[allow(deprecated)] // `on_disk_payload`: see the note on `HnswConfigDiff::from`.
 pub fn collection_params_diff(
     replication_factor: Option<u32>,
     write_consistency_factor: Option<u32>,
     on_disk_payload: Option<bool>,
+    payload: Option<&PayloadStorageSpec>,
 ) -> CollectionParamsDiff {
     CollectionParamsDiff {
         replication_factor,
         write_consistency_factor,
         on_disk_payload,
+        payload: payload.map(payload_storage_params),
         ..Default::default()
+    }
+}
+
+/// Build the per-field-type payload index params union from the flat spec.
+///
+/// The caller is expected to have validated applicability
+/// ([`PayloadIndexParamsSpec::validate_for`]) at parse time; anything not
+/// accepted by `schema` is simply not read here.
+#[allow(deprecated)] // `on_disk`: see the note on `HnswConfigDiff::from`.
+pub fn payload_index_params(schema: PayloadSchemaType, p: &PayloadIndexParamsSpec) -> QIndexParams {
+    let on_disk = p.on_disk;
+    let memory = memory(p.memory);
+    let enable_hnsw = p.enable_hnsw;
+
+    match schema {
+        PayloadSchemaType::Keyword => {
+            QIndexParams::KeywordIndexParams(KeywordIndexParams {
+                is_tenant: p.is_tenant,
+                on_disk,
+                enable_hnsw,
+                // Presence of the message is what enables prefix matching, so
+                // `prefix: false` means "leave it off", not "send an empty one".
+                prefix: p.prefix.unwrap_or(false).then_some(KeywordPrefixParams {}),
+                memory,
+            })
+        }
+        PayloadSchemaType::Integer => QIndexParams::IntegerIndexParams(IntegerIndexParams {
+            lookup: p.lookup,
+            range: p.range,
+            is_principal: p.is_principal,
+            on_disk,
+            enable_hnsw,
+            memory,
+        }),
+        PayloadSchemaType::Float => QIndexParams::FloatIndexParams(FloatIndexParams {
+            on_disk,
+            is_principal: p.is_principal,
+            enable_hnsw,
+            memory,
+        }),
+        PayloadSchemaType::Geo => QIndexParams::GeoIndexParams(GeoIndexParams {
+            on_disk,
+            enable_hnsw,
+            memory,
+        }),
+        PayloadSchemaType::Text => {
+            QIndexParams::TextIndexParams(TextIndexParams {
+                // Validation guarantees a tokenizer is set for text indexes.
+                tokenizer: p
+                    .tokenizer
+                    .map(|t| TokenizerType::from(t) as i32)
+                    .unwrap_or(TokenizerType::Unknown as i32),
+                lowercase: p.lowercase,
+                min_token_len: p.min_token_len,
+                max_token_len: p.max_token_len,
+                on_disk,
+                stopwords: p.stopwords.as_ref().map(StopwordsSet::from),
+                phrase_matching: p.phrase_matching,
+                stemmer: p.stemmer.as_ref().map(StemmingAlgorithm::from),
+                ascii_folding: p.ascii_folding,
+                enable_hnsw,
+                memory,
+            })
+        }
+        PayloadSchemaType::Bool => QIndexParams::BoolIndexParams(BoolIndexParams {
+            on_disk,
+            enable_hnsw,
+            memory,
+        }),
+        PayloadSchemaType::Datetime => QIndexParams::DatetimeIndexParams(DatetimeIndexParams {
+            on_disk,
+            is_principal: p.is_principal,
+            enable_hnsw,
+            memory,
+        }),
+        PayloadSchemaType::Uuid => QIndexParams::UuidIndexParams(UuidIndexParams {
+            is_tenant: p.is_tenant,
+            on_disk,
+            enable_hnsw,
+            memory,
+        }),
     }
 }

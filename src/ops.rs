@@ -25,9 +25,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::Result;
 use crate::spec::{
-    CollectionSpec, HnswConfigSpec, OptimizersConfigSpec, PayloadSchemaType, QuantizationSpec,
-    SparseVectorSpec, VectorSpec,
+    CollectionSpec, HnswConfigSpec, Memory, OptimizersConfigSpec, PayloadIndexParamsSpec,
+    PayloadSchemaType, PayloadStorageSpec, QuantizationSpec, SparseVectorSpec, VectorSpec,
 };
 
 /// A single migration step.
@@ -59,6 +60,9 @@ pub enum Operation {
         collection: String,
         field_name: String,
         schema: PayloadSchemaType,
+        /// Index tuning knobs. Omitted → server defaults.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<PayloadIndexParamsSpec>,
     },
     /// Delete a payload field index. Reversible only when `schema` is supplied
     /// so the index can be recreated.
@@ -67,6 +71,9 @@ pub enum Operation {
         field_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         schema: Option<PayloadSchemaType>,
+        /// Params to recreate the index with when this op is auto-inverted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<PayloadIndexParamsSpec>,
     },
     /// Create an alias pointing at a collection.
     CreateAlias { collection: String, alias: String },
@@ -95,21 +102,29 @@ pub struct UpdateCollectionOp {
     pub quantization_config: Option<QuantizationSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub optimizers_config: Option<OptimizersConfigSpec>,
-    /// Patch parameters of existing named vectors (on_disk, hnsw, quantization).
+    /// Patch parameters of existing named vectors (memory/on_disk, hnsw,
+    /// quantization).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vectors: Option<indexmap::IndexMap<String, VectorParamsDiff>>,
+    /// Move the payload storage between memory tiers (Qdrant 1.19+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<PayloadStorageSpec>,
 }
 
 /// In-place tunables for an existing named vector (size/distance excluded —
 /// those are immutable).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorParamsDiff {
+    /// Superseded by `memory`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_disk: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hnsw_config: Option<HnswConfigSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<QuantizationSpec>,
+    /// Move the vector storage between memory tiers (Qdrant 1.19+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 }
 
 /// A shell command run as a migration step.
@@ -180,6 +195,30 @@ impl Operation {
         }
     }
 
+    /// Check the operation is internally consistent, without touching Qdrant.
+    ///
+    /// Called when a migration file is parsed so `revector validate` — and the
+    /// pre-flight of every other command — rejects a bad step before any server
+    /// is contacted.
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Operation::CreatePayloadIndex {
+                schema,
+                params: Some(params),
+                ..
+            } => params.validate_for(*schema)?,
+            // Params on a delete only exist to recreate the index on downgrade,
+            // which needs the schema anyway — nothing to check without it.
+            Operation::DeletePayloadIndex {
+                schema: Some(schema),
+                params: Some(params),
+                ..
+            } => params.validate_for(*schema)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Derive the operation that undoes this one, when possible.
     ///
     /// Operations that destroy data, or that would need previous state we never
@@ -216,20 +255,24 @@ impl Operation {
                 collection,
                 field_name,
                 schema,
+                params,
             } => Reversibility::Auto(Box::new(Operation::DeletePayloadIndex {
                 collection: collection.clone(),
                 field_name: field_name.clone(),
                 schema: Some(*schema),
+                params: params.clone(),
             })),
             Operation::DeletePayloadIndex {
                 collection,
                 field_name,
                 schema,
+                params,
             } => match schema {
                 Some(schema) => Reversibility::Auto(Box::new(Operation::CreatePayloadIndex {
                     collection: collection.clone(),
                     field_name: field_name.clone(),
                     schema: *schema,
+                    params: params.clone(),
                 })),
                 None => Reversibility::Irreversible(format!(
                     "cannot recreate index on `{collection}.{field_name}` without its `schema`; add `schema:` to the op or provide an explicit `down`"

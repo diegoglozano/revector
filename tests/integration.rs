@@ -23,7 +23,7 @@ use testcontainers::GenericImage;
 /// README — they are bumped together. Override with `REVECTOR_QDRANT_VERSION`
 /// to probe a different server without touching code; the scheduled
 /// `qdrant-compat` CI job points this at `latest` to catch new releases early.
-const SUPPORTED_QDRANT_VERSION: &str = "v1.18.2";
+const SUPPORTED_QDRANT_VERSION: &str = "v1.19.0";
 
 /// Boot a Qdrant container and return it alongside a ready config.
 ///
@@ -262,6 +262,9 @@ up:
         keywords: {}
 "#;
 
+// Reads the deprecated `on_disk` flag on purpose: the migration under test
+// declares it, and revector must keep sending it unchanged.
+#[allow(deprecated)]
 #[tokio::test]
 async fn create_collection_provisions_sparse_vectors() {
     let (_c, config, _lock) = boot_or_skip!();
@@ -450,4 +453,140 @@ async fn advisory_lock_blocks_concurrent_runs() {
 
     // A successful run releases the lock.
     assert!(tracker.read_lock().await.unwrap().is_none());
+}
+
+/// Qdrant 1.19 config surface, end to end: memory placement on the vector
+/// storage / HNSW graph / payload store, a TurboQuant-4 datatype, and a keyword
+/// index that opts into prefix matching.
+const MIG_1_19: &str = r#"
+revision: "0001_tiers"
+down_revision: null
+description: 1.19 memory tiers + prefix index
+up:
+  - op: create_collection
+    name: tiered
+    spec:
+      vectors:
+        "":
+          size: 8
+          distance: Cosine
+          memory: cold
+          hnsw_config:
+            m: 16
+            memory: cached
+      payload:
+        memory: cold
+  - op: create_payload_index
+    collection: tiered
+    field_name: sku
+    schema: keyword
+    params:
+      prefix: true
+      memory: cached
+"#;
+
+#[tokio::test]
+async fn applies_qdrant_1_19_memory_and_index_params() {
+    use qdrant_client::qdrant::{payload_index_params::IndexParams, Memory as QMemory};
+
+    let (_c, config, _lock) = boot_or_skip!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_1_19)]);
+
+    let qdrant = client::connect(&config).unwrap();
+    cleanup(&qdrant, &["tiered"]).await;
+    let chain = resolve_chain(dir);
+
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    runner.up(None).await.unwrap();
+
+    let info = qdrant
+        .collection_info("tiered")
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    let collection_config = info.config.clone().unwrap();
+    let params = collection_config.params.clone().unwrap();
+
+    // Vector storage and payload store landed in the declared tiers.
+    let vectors = match params.vectors_config.unwrap().config.unwrap() {
+        qdrant_client::qdrant::vectors_config::Config::Params(p) => p,
+        other => panic!("expected a single unnamed vector, got {other:?}"),
+    };
+    assert_eq!(vectors.memory, Some(QMemory::Cold as i32));
+    assert_eq!(
+        vectors.hnsw_config.and_then(|h| h.memory),
+        Some(QMemory::Cached as i32)
+    );
+    assert_eq!(
+        params.payload.and_then(|p| p.memory),
+        Some(QMemory::Cold as i32)
+    );
+
+    // The keyword index carries the prefix marker that enables prefix filters.
+    let schema = info
+        .payload_schema
+        .get("sku")
+        .expect("sku index should exist");
+    match schema
+        .params
+        .clone()
+        .and_then(|p| p.index_params)
+        .expect("index params echoed back")
+    {
+        IndexParams::KeywordIndexParams(k) => {
+            assert!(k.prefix.is_some(), "prefix matching should be enabled");
+            assert_eq!(k.memory, Some(QMemory::Cached as i32));
+        }
+        other => panic!("expected keyword index params, got {other:?}"),
+    }
+
+    // `diff` sees the declared placement as satisfied.
+    let spec: CollectionSpec = serde_yaml::from_str(
+        r#"
+vectors:
+  "":
+    size: 8
+    distance: Cosine
+    memory: cold
+payload:
+  memory: cold
+"#,
+    )
+    .unwrap();
+    let report = diff::diff_collection(&qdrant, "tiered", &spec)
+        .await
+        .unwrap();
+    assert!(
+        report.in_sync(),
+        "expected in sync, got {:?}",
+        report.differences
+    );
+
+    // …and reports drift when a different tier is declared.
+    let drifted: CollectionSpec = serde_yaml::from_str(
+        r#"
+vectors:
+  "":
+    size: 8
+    distance: Cosine
+    memory: cached
+"#,
+    )
+    .unwrap();
+    let report = diff::diff_collection(&qdrant, "tiered", &drifted)
+        .await
+        .unwrap();
+    assert!(report
+        .differences
+        .iter()
+        .any(|d| d.path == "vectors.<default>.memory"));
+
+    // Rolling back drops the index and the collection again.
+    runner.down(None, 1).await.unwrap();
+    assert!(!qdrant.collection_exists("tiered").await.unwrap());
+
+    cleanup(&qdrant, &["tiered"]).await;
 }
