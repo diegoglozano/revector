@@ -32,7 +32,27 @@ specific Qdrant server line, kept in lockstep with the `qdrant-client` crate:
 
 | revector | `qdrant-client` crate | Qdrant server (tested) |
 |----------|-----------------------|------------------------|
-| 0.2.x    | 1.18                  | 1.18.x (CI runs `v1.18.2`) |
+| 0.5.x    | 1.19                  | 1.19.x (CI runs `v1.19.0`) |
+| 0.4.x    | 1.18                  | 1.18.x (CI runs `v1.18.2`) |
+
+**Running against an older server.** revector isn't locked to the pinned
+version — a migration that only uses fields your server already understands
+runs fine on an older 1.x. What sets the floor is the *fields a migration
+declares*, not the revector release:
+
+| Field | Minimum Qdrant server |
+|-------|----------------------|
+| `memory:` (any component), collection `payload:`, `params.prefix`, `params.stemmer: disabled` | 1.19.0 |
+| `datatype: turbo4` | 1.18.2 |
+| `create_vector` / `delete_vector` | 1.18.0 |
+| everything else | the version that introduced it |
+
+revector enforces this before it changes anything: `up` and `down` read the
+server version and refuse a plan the server is too old for, naming the field
+and the revision. That check exists because gRPC *drops* fields a server
+predates instead of rejecting them — without it, a 1.19-only setting applied to
+a 1.18 server would silently evaporate while the revision was recorded as
+applied, and upgrading the server later would never reapply it.
 
 **How this stays current.** A weekly
 [`qdrant-compat`](.github/workflows/qdrant-compat.yml) CI job re-runs the full
@@ -46,9 +66,17 @@ tests locally.
 
 ## Install
 
-Once a release is cut, prebuilt binaries for Linux, macOS, and Windows are
-attached to each [GitHub Release](https://github.com/diegoglozano/revector/releases)
-by [cargo-dist], with installers:
+```sh
+# Homebrew (macOS/Linux)
+brew install diegoglozano/tap/revector
+
+# crates.io (requires Rust 1.82+)
+cargo install revector
+```
+
+Prebuilt binaries for Linux, macOS, and Windows are attached to each
+[GitHub Release](https://github.com/diegoglozano/revector/releases) by
+[cargo-dist], with shell/PowerShell installers:
 
 ```sh
 # Shell (Linux/macOS) — downloads the right prebuilt binary
@@ -59,14 +87,15 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 powershell -c "irm https://github.com/diegoglozano/revector/releases/latest/download/revector-installer.ps1 | iex"
 ```
 
-Or build from source (requires Rust 1.82+):
+Or build from source:
 
 ```sh
 cargo install --path .          # from a checkout
 cargo build --release           # ./target/release/revector
 ```
 
-Homebrew and crates.io are planned — see [ROADMAP.md](ROADMAP.md).
+Further distribution channels (PyPI/`uvx`, a Docker image) are tracked in
+[ROADMAP.md](ROADMAP.md).
 
 [cargo-dist]: https://opensource.axo.dev/cargo-dist/
 
@@ -131,11 +160,11 @@ down:
 |-------|--------|------------------|
 | [`create_collection`](https://diegoglozano.github.io/revector/reference/operations/create_collection.html) | Create a collection from a full spec | ✔ → `delete_collection` |
 | [`delete_collection`](https://diegoglozano.github.io/revector/reference/operations/delete_collection.html) | Drop a collection | ✘ (data loss) |
-| [`update_collection`](https://diegoglozano.github.io/revector/reference/operations/update_collection.html) | Patch `hnsw_config`, `quantization_config`, `optimizers_config`, or per-vector params in place | ✘ (prior state unknown) |
+| [`update_collection`](https://diegoglozano.github.io/revector/reference/operations/update_collection.html) | Patch `hnsw_config`, `quantization_config`, `optimizers_config`, payload storage, or per-vector params in place | ✘ (prior state unknown) |
 | [`create_vector`](https://diegoglozano.github.io/revector/reference/operations/create_vector.html) | Add a named dense vector (Qdrant v1.18+) | ✔ → `delete_vector` |
 | [`create_sparse_vector`](https://diegoglozano.github.io/revector/reference/operations/create_sparse_vector.html) | Add a named sparse vector | ✔ → `delete_vector` |
 | [`delete_vector`](https://diegoglozano.github.io/revector/reference/operations/delete_vector.html) | Drop a named vector | ✘ (data loss) |
-| [`create_payload_index`](https://diegoglozano.github.io/revector/reference/operations/create_payload_index.html) | Index a payload field | ✔ → `delete_payload_index` |
+| [`create_payload_index`](https://diegoglozano.github.io/revector/reference/operations/create_payload_index.html) | Index a payload field, with optional index `params` | ✔ → `delete_payload_index` |
 | [`delete_payload_index`](https://diegoglozano.github.io/revector/reference/operations/delete_payload_index.html) | Remove a payload index | ✔ iff `schema:` is given |
 | [`create_alias`](https://diegoglozano.github.io/revector/reference/operations/create_alias.html) | Point an alias at a collection | ✔ → `delete_alias` |
 | [`delete_alias`](https://diegoglozano.github.io/revector/reference/operations/delete_alias.html) | Remove an alias | ✘ (target unknown) |

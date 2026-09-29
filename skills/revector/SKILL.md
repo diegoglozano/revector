@@ -36,6 +36,14 @@ Use when: introducing a second [named vector](https://qdrant.tech/documentation/
 Use when: you start filtering on a field, or need tenant isolation.
 - Use `create_payload_index` / `delete_payload_index` ops; see [payload indexing](https://qdrant.tech/documentation/concepts/indexing/#payload-index).
 - To make a delete reversible, keep the field `schema` on the op so revector can recreate it.
+- Index tuning goes in `params:` (`is_tenant`, `is_principal`, `enable_hnsw`, text analysis, …). Params that don't apply to the declared `schema` are rejected at parse time.
+- Prefix filtering (`match: { prefix: … }`, Qdrant 1.19+) must be built into the index: set `params.prefix: true` on a `keyword` index — it cannot be turned on at query time.
+
+## Memory placement (Qdrant 1.19+)
+Use when: a collection no longer fits comfortably in RAM, or a component should be kept warm.
+- Set `memory: cold | cached | pinned` on vectors, `hnsw_config`, sparse vectors, quantization, payload indexes, and the collection's `payload` block. It supersedes `on_disk` / `always_ram` / `on_disk_payload`, which still work.
+- `pinned` is rejected for dense vector storage and the payload store.
+- Re-tiering a live collection is an `update_collection` op, so write an explicit `down` with the previous tiers.
 
 ## Changing a vector's size or distance (model change)
 Use when: switching embedding model or dimensionality.

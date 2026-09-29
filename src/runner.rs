@@ -11,9 +11,12 @@ use qdrant_client::Qdrant;
 use tracing::{info, warn};
 
 use crate::chain::Chain;
+use crate::client;
 use crate::error::{Error, Result};
 use crate::executor::Executor;
+use crate::ops::Operation;
 use crate::tracking::Tracker;
+use crate::version::VersionRequirement;
 
 /// Per-revision status line.
 #[derive(Debug, Clone)]
@@ -201,6 +204,55 @@ impl<'a> Runner<'a> {
         Ok(())
     }
 
+    /// Refuse to run operations the connected server is too old to understand.
+    ///
+    /// Qdrant's gRPC API drops unknown proto fields instead of rejecting them,
+    /// so applying a 1.19-only setting to a 1.18 server would *succeed* with the
+    /// setting silently discarded — and the runner would then record the
+    /// revision as applied. Upgrading the server later wouldn't reapply it, and
+    /// the checksum guard would block editing the file to retry. Checking first
+    /// turns that silent divergence into an error naming the field.
+    ///
+    /// A server whose version string doesn't parse is left alone: refusing to
+    /// migrate over an unrecognised build string would be worse than the risk.
+    async fn verify_server_version<'o>(
+        &self,
+        planned: impl IntoIterator<Item = (&'o str, &'o Operation)>,
+    ) -> Result<()> {
+        let required: Vec<(&str, VersionRequirement)> = planned
+            .into_iter()
+            .flat_map(|(revision, op)| {
+                op.version_requirements()
+                    .into_iter()
+                    .map(move |req| (revision, req))
+            })
+            .collect();
+
+        if required.is_empty() {
+            return Ok(());
+        }
+
+        let server = match client::server_version(self.client).await? {
+            Some(v) => v,
+            None => {
+                warn!("could not parse the server version; skipping the minimum-version check");
+                return Ok(());
+            }
+        };
+
+        for (revision, req) in required {
+            if server < req.version {
+                return Err(Error::ServerTooOld {
+                    revision: revision.to_string(),
+                    feature: req.feature.clone(),
+                    required: req.version.to_string(),
+                    found: server.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Apply pending migrations up to `target` (default: chain head), holding
     /// the advisory lock for the duration.
     pub async fn up(&self, target: Option<&str>) -> Result<Applied> {
@@ -239,9 +291,17 @@ impl<'a> Runner<'a> {
             None => 0,
         };
 
+        let pending = &self.chain.migrations()[start..=target_pos];
+        self.verify_server_version(
+            pending
+                .iter()
+                .flat_map(|m| m.file.up.iter().map(|op| (m.revision(), op))),
+        )
+        .await?;
+
         let executor = self.executor();
         let mut done = Vec::new();
-        for m in &self.chain.migrations()[start..=target_pos] {
+        for m in pending {
             info!(
                 "applying {} — {}",
                 m.revision(),
@@ -294,23 +354,33 @@ impl<'a> Runner<'a> {
             None => current as isize - steps as isize,
         };
 
-        let executor = self.executor();
-        let mut done = Vec::new();
+        // Resolve the whole plan before touching anything, so an irreversible
+        // step — or one the server is too old for — fails the run rather than
+        // leaving it half rolled back.
+        let mut plan: Vec<(&str, Vec<Operation>)> = Vec::new();
         let mut pos = current as isize;
         while pos > floor {
             let m = &self.chain.migrations()[pos as usize];
-            info!("rolling back {}", m.revision());
-            // Resolve downgrade ops first so an irreversible step fails before
-            // any mutation happens.
-            let ops = m.downgrade_ops()?;
-            for op in &ops {
+            plan.push((m.revision(), m.downgrade_ops()?));
+            pos -= 1;
+        }
+        self.verify_server_version(
+            plan.iter()
+                .flat_map(|(revision, ops)| ops.iter().map(move |op| (*revision, op))),
+        )
+        .await?;
+
+        let executor = self.executor();
+        let mut done = Vec::new();
+        for (revision, ops) in &plan {
+            info!("rolling back {revision}");
+            for op in ops {
                 executor.execute(op).await?;
             }
             if !self.dry_run {
-                self.tracker.remove(m.revision()).await?;
+                self.tracker.remove(revision).await?;
             }
-            done.push(m.revision().to_string());
-            pos -= 1;
+            done.push(revision.to_string());
         }
 
         if done.is_empty() {

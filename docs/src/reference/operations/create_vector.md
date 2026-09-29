@@ -12,13 +12,13 @@ up:
     spec:
       size: 512
       distance: Dot
-      on_disk: true
       datatype: float16
 ```
 
-To tune the new vector's `hnsw_config` or `quantization_config`, follow it with
-an [`update_collection`](./update_collection.md) step — Qdrant's add-vector API
-doesn't accept those at create time.
+To tune the new vector's `hnsw_config`, `quantization_config` or `memory`
+placement, follow it with an [`update_collection`](./update_collection.md)
+step — Qdrant's add-vector API doesn't accept those at create time. revector
+warns when a `create_vector` spec declares one of them.
 
 ## Fields
 
@@ -34,8 +34,9 @@ doesn't accept those at create time.
 |-------|------|-------------|
 | `size` | uint | Dimensionality. Immutable once created. |
 | `distance` | `Cosine` \| `Euclid` \| `Dot` \| `Manhattan` | Distance metric. Immutable. |
-| `on_disk` | bool | Store vectors on disk rather than in RAM. |
-| `datatype` | `float32` \| `uint8` \| `float16` | Element storage type. |
+| `on_disk` | bool | Ignored at create time — apply via `update_collection`. |
+| `memory` | [`Memory`](../specs.md#memory) | Ignored at create time — apply via `update_collection`. |
+| `datatype` | `float32` \| `uint8` \| `float16` \| `turbo4` | Element storage type (`turbo4` needs Qdrant 1.19+). |
 | `hnsw_config` | [`HnswConfigSpec`](../specs.md#hnswconfigspec) | Ignored at create time — apply via `update_collection`. |
 | `quantization_config` | [`QuantizationSpec`](../specs.md#quantizationspec) | Ignored at create time — apply via `update_collection`. |
 

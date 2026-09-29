@@ -16,7 +16,7 @@ up:
         image:                       # multiple named vectors
           size: 512
           distance: Dot
-          on_disk: true
+          memory: cold               # placement tier (Qdrant 1.19+)
       sparse_vectors:
         keywords:
           on_disk: false
@@ -27,7 +27,8 @@ up:
         default_segment_number: 2
       shard_number: 2
       replication_factor: 2
-      on_disk_payload: true
+      payload:
+        memory: cold                 # payload storage tier (Qdrant 1.19+)
 ```
 
 ## Fields
@@ -49,7 +50,8 @@ up:
 | `shard_number` | uint | Number of shards (immutable on single-node). |
 | `replication_factor` | uint | Replication factor. |
 | `write_consistency_factor` | uint | Write consistency factor. |
-| `on_disk_payload` | bool | Store the whole collection payload on disk. |
+| `on_disk_payload` | bool | Store the whole collection payload on disk. Superseded by `payload.memory`. |
+| `payload` | [`PayloadStorageSpec`](../specs.md#payloadstoragespec) | Payload storage configuration (Qdrant 1.19+). |
 
 ## Reversibility
 

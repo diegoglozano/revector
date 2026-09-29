@@ -25,10 +25,12 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::Result;
 use crate::spec::{
-    CollectionSpec, HnswConfigSpec, OptimizersConfigSpec, PayloadSchemaType, QuantizationSpec,
-    SparseVectorSpec, VectorSpec,
+    CollectionSpec, HnswConfigSpec, Memory, OptimizersConfigSpec, PayloadIndexParamsSpec,
+    PayloadSchemaType, PayloadStorageSpec, QuantizationSpec, SparseVectorSpec, VectorSpec,
 };
+use crate::version::VersionRequirement;
 
 /// A single migration step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,6 +61,9 @@ pub enum Operation {
         collection: String,
         field_name: String,
         schema: PayloadSchemaType,
+        /// Index tuning knobs. Omitted → server defaults.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<PayloadIndexParamsSpec>,
     },
     /// Delete a payload field index. Reversible only when `schema` is supplied
     /// so the index can be recreated.
@@ -67,6 +72,9 @@ pub enum Operation {
         field_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         schema: Option<PayloadSchemaType>,
+        /// Params to recreate the index with when this op is auto-inverted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        params: Option<PayloadIndexParamsSpec>,
     },
     /// Create an alias pointing at a collection.
     CreateAlias { collection: String, alias: String },
@@ -95,21 +103,29 @@ pub struct UpdateCollectionOp {
     pub quantization_config: Option<QuantizationSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub optimizers_config: Option<OptimizersConfigSpec>,
-    /// Patch parameters of existing named vectors (on_disk, hnsw, quantization).
+    /// Patch parameters of existing named vectors (memory/on_disk, hnsw,
+    /// quantization).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vectors: Option<indexmap::IndexMap<String, VectorParamsDiff>>,
+    /// Move the payload storage between memory tiers (Qdrant 1.19+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<PayloadStorageSpec>,
 }
 
 /// In-place tunables for an existing named vector (size/distance excluded —
 /// those are immutable).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorParamsDiff {
+    /// Superseded by `memory`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_disk: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hnsw_config: Option<HnswConfigSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quantization_config: Option<QuantizationSpec>,
+    /// Move the vector storage between memory tiers (Qdrant 1.19+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
 }
 
 /// A shell command run as a migration step.
@@ -180,6 +196,80 @@ impl Operation {
         }
     }
 
+    /// Check the operation is internally consistent, without touching Qdrant.
+    ///
+    /// Called when a migration file is parsed so `revector validate` — and the
+    /// pre-flight of every other command — rejects a bad step before any server
+    /// is contacted.
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Operation::CreatePayloadIndex {
+                schema,
+                params: Some(params),
+                ..
+            } => params.validate_for(*schema)?,
+            // Params on a delete only exist to recreate the index on downgrade,
+            // which needs the schema anyway — nothing to check without it.
+            Operation::DeletePayloadIndex {
+                schema: Some(schema),
+                params: Some(params),
+                ..
+            } => params.validate_for(*schema)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The oldest Qdrant that understands everything this operation sends.
+    ///
+    /// Only fields that actually reach the wire count. [`crate::executor`]
+    /// drops some declarations by design — Qdrant's add-vector API takes
+    /// neither tuning nor placement, and a payload-index delete carries
+    /// `params` solely to rebuild the index on the way back up — and a
+    /// requirement they raised would block migrations that run fine.
+    pub fn version_requirements(&self) -> Vec<VersionRequirement> {
+        let mut out = Vec::new();
+        match self {
+            Operation::CreateCollection { spec, .. } => spec.version_requirements(&mut out),
+            Operation::UpdateCollection(op) => {
+                if let Some(h) = &op.hnsw_config {
+                    h.version_requirements("hnsw_config", &mut out);
+                }
+                if let Some(q) = &op.quantization_config {
+                    q.version_requirements("quantization_config", &mut out);
+                }
+                if let Some(vectors) = &op.vectors {
+                    for (name, d) in vectors {
+                        let display = if name.is_empty() { "<default>" } else { name };
+                        d.version_requirements(&format!("vectors.{display}"), &mut out);
+                    }
+                }
+                if let Some(p) = &op.payload {
+                    p.version_requirements("payload", &mut out);
+                }
+            }
+            Operation::CreateVector { spec, name, .. } => {
+                // Only the datatype survives the add-vector API; everything
+                // else in the spec is warned about and dropped.
+                if spec.datatype == Some(crate::spec::Datatype::Turbo4) {
+                    out.push(VersionRequirement::new(
+                        crate::version::TURBO4_DATATYPE,
+                        format!("`datatype: turbo4` on vector `{name}`"),
+                    ));
+                }
+            }
+            Operation::CreatePayloadIndex {
+                field_name,
+                params: Some(params),
+                ..
+            } => params.version_requirements(&format!("`{field_name}` index params"), &mut out),
+            // Sparse vectors are created with server defaults, and a delete
+            // sends neither schema nor params.
+            _ => {}
+        }
+        out
+    }
+
     /// Derive the operation that undoes this one, when possible.
     ///
     /// Operations that destroy data, or that would need previous state we never
@@ -216,20 +306,24 @@ impl Operation {
                 collection,
                 field_name,
                 schema,
+                params,
             } => Reversibility::Auto(Box::new(Operation::DeletePayloadIndex {
                 collection: collection.clone(),
                 field_name: field_name.clone(),
                 schema: Some(*schema),
+                params: params.clone(),
             })),
             Operation::DeletePayloadIndex {
                 collection,
                 field_name,
                 schema,
+                params,
             } => match schema {
                 Some(schema) => Reversibility::Auto(Box::new(Operation::CreatePayloadIndex {
                     collection: collection.clone(),
                     field_name: field_name.clone(),
                     schema: *schema,
+                    params: params.clone(),
                 })),
                 None => Reversibility::Irreversible(format!(
                     "cannot recreate index on `{collection}.{field_name}` without its `schema`; add `schema:` to the op or provide an explicit `down`"
@@ -250,6 +344,25 @@ impl Operation {
                 "exec step `{}` has no automatic inverse; provide an explicit `down`",
                 op.name.clone().unwrap_or_else(|| op.command.clone())
             )),
+        }
+    }
+}
+
+impl VectorParamsDiff {
+    /// Requirements for an in-place vector patch. Unlike [`crate::spec::VectorSpec`]
+    /// this is sent whole, so every field counts.
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        if self.memory.is_some() {
+            out.push(VersionRequirement::new(
+                crate::version::MEMORY_PLACEMENT,
+                format!("`memory` on {path}"),
+            ));
+        }
+        if let Some(h) = &self.hnsw_config {
+            h.version_requirements(&format!("{path}.hnsw_config"), out);
+        }
+        if let Some(q) = &self.quantization_config {
+            q.version_requirements(&format!("{path}.quantization_config"), out);
         }
     }
 }

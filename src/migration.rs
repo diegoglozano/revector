@@ -64,11 +64,34 @@ impl Migration {
                 source,
             })?;
         let checksum = checksum_bytes(&bytes);
-        Ok(Migration {
+        let migration = Migration {
             file,
             path: path.to_path_buf(),
             checksum,
-        })
+        };
+        migration.validate_ops()?;
+        Ok(migration)
+    }
+
+    /// Run every operation's offline consistency check, naming the file that
+    /// carries the bad step.
+    fn validate_ops(&self) -> Result<()> {
+        let up = self.file.up.iter();
+        let down = self.file.down.iter().flatten();
+        for op in up.chain(down) {
+            op.validate().map_err(|e| {
+                Error::InvalidOperation(format!(
+                    "{} (revision `{}`, step `{}`)",
+                    match e {
+                        Error::InvalidOperation(msg) => msg,
+                        other => other.to_string(),
+                    },
+                    self.file.revision,
+                    op.describe()
+                ))
+            })?;
+        }
+        Ok(())
     }
 
     /// Resolve the operations to run when downgrading this revision.

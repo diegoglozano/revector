@@ -6,9 +6,14 @@ name: Qdrant compatibility
 # against a *different* server — by default the newest published image — so we
 # learn about breakage before users do:
 #
-#   * green  -> the new Qdrant release is safe; bump the pin + qdrant-client and
+#   * green  -> the new *server* is safe for the current code; bump the pin and
 #               update the README compatibility table.
 #   * red    -> the new release needs code changes before we can support it.
+#
+# Note this job says nothing about the matching `qdrant-client` bump: it tests
+# the current client against a new server, not a new client. Dependabot raises
+# the client bump as its own PR (see the `qdrant` group in dependabot.yml), and
+# that PR's CI run is what proves the new client compiles.
 on:
   schedule:
     # Weekly, Monday 06:00 UTC.
