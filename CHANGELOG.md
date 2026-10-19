@@ -6,6 +6,10 @@ All notable changes to revector are documented here. The format is based on
 
 ## [Unreleased]
 
+### Security
+- Update the locked `rustls` dependency to 0.23.46 to address
+  RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348, and RUSTSEC-2026-0349.
+
 ## [0.5.0] - 2026-08-12
 
 ### Added
