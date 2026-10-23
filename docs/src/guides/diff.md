@@ -28,6 +28,10 @@ hnsw_config:
   ef_construct: 128
 ```
 
+Declared vector datatypes (including `turbo8` / `turbo16`) and ID tracker
+placement (`id_tracker.memory`) are compared alongside vector size, distance,
+and component memory tiers. Undeclared optional fields remain unconstrained.
+
 `diff` exits non-zero when differences are found, so it slots into CI as a
 drift guard. Folding the full migration chain into a desired-state spec is
 future work — today you write the spec file by hand.

@@ -27,8 +27,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::spec::{
-    CollectionSpec, HnswConfigSpec, Memory, OptimizersConfigSpec, PayloadIndexParamsSpec,
-    PayloadSchemaType, PayloadStorageSpec, QuantizationSpec, SparseVectorSpec, VectorSpec,
+    CollectionSpec, HnswConfigSpec, IdTrackerSpec, Memory, OptimizersConfigSpec,
+    PayloadIndexParamsSpec, PayloadSchemaType, PayloadStorageSpec, QuantizationSpec,
+    SparseVectorSpec, VectorSpec,
 };
 use crate::version::VersionRequirement;
 
@@ -110,6 +111,9 @@ pub struct UpdateCollectionOp {
     /// Move the payload storage between memory tiers (Qdrant 1.19+).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<PayloadStorageSpec>,
+    /// Move the point ID mapping between memory tiers (Qdrant 1.20+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_tracker: Option<IdTrackerSpec>,
 }
 
 /// In-place tunables for an existing named vector (size/distance excluded —
@@ -247,15 +251,15 @@ impl Operation {
                 if let Some(p) = &op.payload {
                     p.version_requirements("payload", &mut out);
                 }
+                if let Some(id) = &op.id_tracker {
+                    id.version_requirements("id_tracker", &mut out);
+                }
             }
             Operation::CreateVector { spec, name, .. } => {
                 // Only the datatype survives the add-vector API; everything
                 // else in the spec is warned about and dropped.
-                if spec.datatype == Some(crate::spec::Datatype::Turbo4) {
-                    out.push(VersionRequirement::new(
-                        crate::version::TURBO4_DATATYPE,
-                        format!("`datatype: turbo4` on vector `{name}`"),
-                    ));
+                if let Some(datatype) = spec.datatype {
+                    datatype.version_requirements(&format!("vector `{name}`"), &mut out);
                 }
             }
             Operation::CreatePayloadIndex {

@@ -24,6 +24,10 @@ pub const MEMORY_PLACEMENT: ServerVersion = ServerVersion::new(1, 19, 0);
 /// even though the client crate only exposed it in 1.19.
 pub const TURBO4_DATATYPE: ServerVersion = ServerVersion::new(1, 18, 2);
 
+/// Qdrant 1.20: full-text scoring, code tokenizer, nested indexes,
+/// TurboQuant 8/16-bit storage, 8-bit quantization, and ID tracker placement.
+pub const QDRANT_1_20: ServerVersion = ServerVersion::new(1, 20, 0);
+
 /// A Qdrant server version, ordered by `(major, minor, patch)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ServerVersion {

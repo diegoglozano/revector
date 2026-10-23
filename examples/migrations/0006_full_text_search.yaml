@@ -1,0 +1,30 @@
+revision: "0006_full_text_search"
+down_revision: "0005_memory_tiers"
+description: enable native BM25 search and per-element offer indexes (Qdrant 1.20+)
+
+# The application queries the description with:
+# { "query": { "text": "wireless headphones" }, "using": "description" }
+# All operations in this revision auto-reverse; no explicit down is needed.
+up:
+  - op: create_payload_index
+    collection: products
+    field_name: description
+    schema: text
+    params:
+      tokenizer: word
+      lowercase: true
+      scoring: { type: bm25 }
+
+  - op: create_payload_index
+    collection: products
+    field_name: offers[].shop
+    schema: keyword
+    params:
+      nested: offers
+
+  - op: create_payload_index
+    collection: products
+    field_name: offers[].price
+    schema: float
+    params:
+      nested: offers

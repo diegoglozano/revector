@@ -6,6 +6,23 @@ All notable changes to revector are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-23
+
+### Added
+- Qdrant 1.20 schema/config support: text index `scoring: { type: bm25 }`,
+  `tokenizer: code`, and `nested` array paths on every payload index type.
+- `turbo8` and `turbo16` vector datatypes and TurboQuant `bits: "8"` quantization.
+- `id_tracker: { memory: cold | cached | pinned }` on collection creation and
+  updates, with declaration-driven drift detection.
+- Minimum-server guards for all new 1.20 settings, including rollback plans.
+- Live 1.20 coverage for BM25 code search, nested indexes, TurboQuant storage,
+  ID tracker retiering and rollback; rejection against a 1.19 server.
+
+### Changed
+- Upgrade to `qdrant-client` 1.20 with integration tests pinned
+  to Qdrant `v1.20.0`. Existing migration fields keep their previous wire format.
+- `diff` now checks explicitly declared vector datatypes.
+
 ### Security
 - Update the locked `rustls` dependency to 0.23.46 to address
   RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348, and RUSTSEC-2026-0349.
@@ -109,6 +126,8 @@ All notable changes to revector are documented here. The format is based on
 - Commands: `init`, `new`, `status`, `up`, `down`, `to`, `diff`.
 - Distribution via cargo-dist (binaries + installers), crates.io, and Homebrew.
 
+[Unreleased]: https://github.com/diegoglozano/revector/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/diegoglozano/revector/releases/tag/v0.6.0
 [0.5.0]: https://github.com/diegoglozano/revector/releases/tag/v0.5.0
 [0.4.0]: https://github.com/diegoglozano/revector/releases/tag/v0.4.0
 [0.3.0]: https://github.com/diegoglozano/revector/releases/tag/v0.3.0

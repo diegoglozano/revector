@@ -23,7 +23,7 @@ use testcontainers::GenericImage;
 /// README — they are bumped together. Override with `REVECTOR_QDRANT_VERSION`
 /// to probe a different server without touching code; the scheduled
 /// `qdrant-compat` CI job points this at `latest` to catch new releases early.
-const SUPPORTED_QDRANT_VERSION: &str = "v1.19.0";
+const SUPPORTED_QDRANT_VERSION: &str = "v1.20.0";
 
 /// Boot a Qdrant container and return it alongside a ready config.
 ///
@@ -667,3 +667,283 @@ up:
       "":
         memory: cold
 "#;
+
+const MIG_1_20: &str = r#"
+revision: "0001_search"
+down_revision: null
+up:
+  - op: create_collection
+    name: search_120
+    spec:
+      vectors:
+        compact:
+          size: 8
+          distance: Cosine
+          datatype: turbo8
+        precise:
+          size: 8
+          distance: Cosine
+          datatype: turbo16
+        original:
+          size: 8
+          distance: Cosine
+          quantization_config:
+            turboquant: { bits: "8", memory: cold }
+      id_tracker: { memory: cold }
+  - op: create_payload_index
+    collection: search_120
+    field_name: body
+    schema: text
+    params:
+      tokenizer: code
+      scoring: { type: bm25 }
+  - op: create_payload_index
+    collection: search_120
+    field_name: offers[].price
+    schema: integer
+    params:
+      nested: offers
+  - op: create_vector
+    collection: search_120
+    name: added
+    spec:
+      size: 8
+      distance: Cosine
+      datatype: turbo16
+"#;
+
+#[tokio::test]
+async fn applies_qdrant_1_20_search_storage_and_id_tracker() {
+    use qdrant_client::qdrant::{
+        payload_index_params::IndexParams, quantization_config::Quantization,
+        vectors_config::Config as VConfig, Datatype, Memory, PointStruct, QueryPointsBuilder,
+        TextQuery, TextScoringType, TokenizerType, TurboQuantBitSize, UpsertPointsBuilder,
+    };
+
+    let (_c, config, _lock) = boot_or_skip!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    write_migrations(dir, &[("0001.yaml", MIG_1_20)]);
+    let qdrant = client::connect(&config).unwrap();
+    cleanup(&qdrant, &["search_120"]).await;
+    let chain = resolve_chain(dir);
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    runner.up(None).await.unwrap();
+    // An already-applied revision remains a no-op.
+    assert!(runner.up(None).await.unwrap().revisions.is_empty());
+
+    let info = qdrant
+        .collection_info("search_120")
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    let params = info.config.unwrap().params.unwrap();
+    assert_eq!(params.id_tracker.unwrap().memory, Some(Memory::Cold as i32));
+    let VConfig::ParamsMap(vectors) = params.vectors_config.unwrap().config.unwrap() else {
+        panic!("expected named vectors");
+    };
+    assert_eq!(
+        vectors.map["compact"].datatype,
+        Some(Datatype::Turbo8 as i32)
+    );
+    assert_eq!(
+        vectors.map["precise"].datatype,
+        Some(Datatype::Turbo16 as i32)
+    );
+    assert_eq!(
+        vectors.map["added"].datatype,
+        Some(Datatype::Turbo16 as i32)
+    );
+    let Quantization::Turboquant(t) = vectors.map["original"]
+        .quantization_config
+        .as_ref()
+        .unwrap()
+        .quantization
+        .as_ref()
+        .unwrap()
+    else {
+        panic!("expected TurboQuant")
+    };
+    assert_eq!(t.bits, Some(TurboQuantBitSize::Bits8 as i32));
+    let IndexParams::TextIndexParams(text) = info.payload_schema["body"]
+        .params
+        .as_ref()
+        .unwrap()
+        .index_params
+        .as_ref()
+        .unwrap()
+    else {
+        panic!("expected text index")
+    };
+    assert_eq!(text.tokenizer, TokenizerType::Code as i32);
+    assert_eq!(
+        text.scoring.as_ref().unwrap().r#type,
+        TextScoringType::Bm25 as i32
+    );
+    let IndexParams::IntegerIndexParams(integer) = info.payload_schema["offers[].price"]
+        .params
+        .as_ref()
+        .unwrap()
+        .index_params
+        .as_ref()
+        .unwrap()
+    else {
+        panic!("expected integer index")
+    };
+    // Qdrant canonicalizes array paths when returning index params.
+    assert_eq!(integer.nested.as_deref(), Some("offers[]"));
+
+    // The index created by the migration ranks code identifiers as natural words.
+    let points = [(1, "getUserName"), (2, "deleteInvoice")]
+        .into_iter()
+        .map(|(id, body)| {
+            let vectors: std::collections::HashMap<String, Vec<f32>> =
+                ["compact", "precise", "original", "added"]
+                    .into_iter()
+                    .map(|name| (name.into(), vec![0.5; 8]))
+                    .collect();
+            PointStruct::new(
+                id,
+                vectors,
+                qdrant_client::Payload::try_from(serde_json::json!({"body": body})).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    qdrant
+        .upsert_points(UpsertPointsBuilder::new("search_120", points).wait(true))
+        .await
+        .unwrap();
+    let results = qdrant
+        .query(
+            QueryPointsBuilder::new("search_120")
+                .query(TextQuery {
+                    query: "user name".into(),
+                    scoring: None,
+                })
+                .using("body")
+                .limit(10),
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, Some(1u64.into()));
+    assert!(results[0].score > 0.0);
+
+    // Retiering the ID tracker can be applied and explicitly rolled back.
+    write_migrations(
+        dir,
+        &[(
+            "0002.yaml",
+            r#"
+revision: "0002_retier"
+down_revision: "0001_search"
+up:
+  - op: update_collection
+    collection: search_120
+    id_tracker: { memory: cached }
+down:
+  - op: update_collection
+    collection: search_120
+    id_tracker: { memory: cold }
+"#,
+        )],
+    );
+    let chain = resolve_chain(dir);
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, dir);
+    runner.up(None).await.unwrap();
+    let file: revector::migration::MigrationFile = serde_yaml::from_str(MIG_1_20).unwrap();
+    let revector::ops::Operation::CreateCollection { mut spec, .. } = file.up[0].clone() else {
+        panic!("expected collection");
+    };
+    spec.vectors.insert(
+        "added".into(),
+        serde_yaml::from_str("size: 8\ndistance: Cosine\ndatatype: turbo16").unwrap(),
+    );
+    spec.id_tracker.as_mut().unwrap().memory = Some(revector::spec::Memory::Cached);
+    assert!(diff::diff_collection(&qdrant, "search_120", &spec)
+        .await
+        .unwrap()
+        .in_sync());
+    spec.id_tracker.as_mut().unwrap().memory = Some(revector::spec::Memory::Cold);
+    spec.vectors.get_mut("compact").unwrap().datatype = Some(revector::spec::Datatype::Turbo16);
+    let report = diff::diff_collection(&qdrant, "search_120", &spec)
+        .await
+        .unwrap();
+    assert_eq!(report.differences.len(), 2, "{:?}", report.differences);
+    assert!(report
+        .differences
+        .iter()
+        .any(|d| d.path == "id_tracker.memory"));
+    assert!(report
+        .differences
+        .iter()
+        .any(|d| d.path == "vectors.compact.datatype"));
+    runner.down(None, 1).await.unwrap();
+    let params = qdrant
+        .collection_info("search_120")
+        .await
+        .unwrap()
+        .result
+        .unwrap()
+        .config
+        .unwrap()
+        .params
+        .unwrap();
+    assert_eq!(params.id_tracker.unwrap().memory, Some(Memory::Cold as i32));
+    runner.down(None, 1).await.unwrap();
+    assert!(!qdrant.collection_exists("search_120").await.unwrap());
+}
+
+#[tokio::test]
+async fn refuses_1_20_fields_on_1_19_before_applying_any_revision() {
+    let _guard = test_lock().lock().await;
+    if std::env::var("REVECTOR_TEST_URL").is_ok()
+        || std::env::var("REVECTOR_QDRANT_VERSION").is_ok()
+    {
+        eprintln!("skipping old-server test: it pins its own Qdrant version");
+        return;
+    }
+    let Some((_c, config)) = boot_tag("v1.19.0").await else {
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    write_migrations(
+        tmp.path(),
+        &[
+            ("0001.yaml", MIG_1),
+            (
+                "0002.yaml",
+                r#"
+revision: "0002_search"
+down_revision: "0001_products"
+up:
+  - op: create_payload_index
+    collection: products
+    field_name: body
+    schema: text
+    params:
+      tokenizer: word
+      scoring: { type: bm25 }
+"#,
+            ),
+        ],
+    );
+    let qdrant = client::connect(&config).unwrap();
+    let chain = resolve_chain(tmp.path());
+    let runner = Runner::new(&qdrant, &chain, &config.tracking_collection, tmp.path());
+    let err = runner.up(None).await.unwrap_err().to_string();
+    assert!(
+        err.contains("too old") && err.contains("1.20.0") && err.contains("scoring"),
+        "{err}"
+    );
+    assert!(!qdrant.collection_exists("products").await.unwrap());
+    assert!(runner
+        .status()
+        .await
+        .unwrap()
+        .revisions
+        .iter()
+        .all(|r| !r.applied));
+}

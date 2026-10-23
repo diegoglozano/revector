@@ -22,6 +22,7 @@ state passed to `revector diff`.
 | `write_consistency_factor` | uint | Write consistency factor. |
 | `on_disk_payload` | bool | Store the whole collection payload on disk. Superseded by `payload.memory`. |
 | `payload` | [`PayloadStorageSpec`](#payloadstoragespec) | Payload storage configuration (Qdrant 1.19+). |
+| `id_tracker` | [`IdTrackerSpec`](#idtrackerspec) | Memory placement of the point ID mapping (Qdrant 1.20+). |
 
 ## `VectorSpec`
 
@@ -139,7 +140,7 @@ encodes each component down to a handful of bits without a training pass.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `bits` | string | Bits per component — one of `1`, `1.5`, `2`, `4`. Omitted → server default. |
+| `bits` | string | Bits per component — one of `1`, `1.5`, `2`, `4`, `8` (`8` requires Qdrant 1.20+). Omitted → server default. |
 | `always_ram` | bool | Keep quantized vectors in RAM. Superseded by `memory`. |
 | `memory` | [`Memory`](#memory) | Memory placement of the quantized vectors (Qdrant 1.19+). |
 
@@ -163,10 +164,12 @@ Optimizer thresholds and behavior. All fields optional.
 
 ## `Datatype`
 
-`float32` · `uint8` · `float16` · `turbo4`
+`float32` · `uint8` · `float16` · `turbo4` · `turbo8` · `turbo16`
 
 `turbo4` stores the primary vectors with TurboQuant 4-bit encoding and requires
-Qdrant 1.19+.
+Qdrant 1.18.2+. `turbo8` and `turbo16` require Qdrant 1.20+ and store
+primary vectors at 8 or 16 bits per dimension. Datatypes are selected when
+creating a collection or adding a vector; changing them requires a new vector.
 
 ## `Memory`
 
@@ -192,7 +195,9 @@ a *silent* no-op — gRPC drops fields a server predates rather than rejecting
 them — so `up` and `down` check the live server version first and refuse the
 run, naming the field and revision. The same guard covers the collection
 `payload:` block, `params.prefix`, `params.stemmer: disabled`, and
-`datatype: turbo4` (which needs 1.18.2).
+`datatype: turbo4` (which needs 1.18.2). Qdrant 1.20 settings — `id_tracker`,
+`turbo8`, `turbo16`, TurboQuant `bits: "8"`, index `nested` / `scoring`, and
+`tokenizer: code` — are guarded at 1.20.0.
 
 ## `PayloadStorageSpec`
 
@@ -207,6 +212,33 @@ Payload storage configuration (Qdrant 1.19+) — the successor to
 payload:
   memory: cold
 ```
+
+## `IdTrackerSpec`
+
+Memory placement of the point ID mapping in indexed segments (Qdrant 1.20+).
+Accepted on `create_collection.spec` and `update_collection`; `diff` compares
+placement only when it is declared.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `memory` | [`Memory`](#memory) | `pinned` (default), `cached`, or `cold`. |
+
+```yaml
+id_tracker:
+  memory: cold
+```
+
+## `TextScoringSpec`
+
+Enable BM25 ranking on a full-text payload index (Qdrant 1.20+):
+
+```yaml
+scoring: { type: bm25 }
+```
+
+BM25 statistics are derived from indexed payload text. Applications select the
+payload field through `using` in a Qdrant text query; query-time `k` and `b`
+parameters belong to the application, not the index migration.
 
 ## `PayloadSchemaType`
 
@@ -223,6 +255,8 @@ offline rather than being silently dropped.
 
 | Field | Type | Applies to | Description |
 |-------|------|-----------|-------------|
+| `nested` | string | all | Array path whose elements are indexed separately, e.g. `offers` for `offers[].price` (Qdrant 1.20+). |
+| `scoring` | [`TextScoringSpec`](#textscoringspec) | `text` | Enable BM25 ranking (Qdrant 1.20+). |
 | `on_disk` | bool | all | Store the index on disk. Superseded by `memory`. |
 | `memory` | [`Memory`](#memory) | all | Memory placement of the index (Qdrant 1.19+). |
 | `enable_hnsw` | bool | all | Build payload-aware HNSW links for this field (needs `payload_m > 0`). |
@@ -231,13 +265,22 @@ offline rather than being silently dropped.
 | `prefix` | bool | `keyword` | Enable `match: { prefix: … }` filtering (Qdrant 1.19+). |
 | `lookup` | bool | `integer` | Support direct lookups. |
 | `range` | bool | `integer` | Support range filters. |
-| `tokenizer` | `prefix`·`whitespace`·`word`·`multilingual` | `text` | Tokenizer. Required when a `text` index declares `params`. |
+| `tokenizer` | `prefix`·`whitespace`·`word`·`multilingual`·`code` | `text` | Tokenizer. Required when a `text` index declares `params`; `code` requires Qdrant 1.20+. |
 | `lowercase` | bool | `text` | Lowercase all tokens. |
 | `min_token_len` / `max_token_len` | uint | `text` | Token length bounds. |
 | `phrase_matching` | bool | `text` | Support phrase matching. |
 | `ascii_folding` | bool | `text` | Fold accented characters to ASCII. |
 | `stopwords` | [`StopwordsSpec`](#stopwordsspec) | `text` | Stopwords to drop when tokenizing. |
 | `stemmer` | [`StemmerSpec`](#stemmerspec) | `text` | Stemming algorithm. |
+
+The `code` tokenizer splits identifiers at underscores and case changes, while
+also indexing the full identifier. `getUserName` can match `user name` or
+`get_user_name`.
+
+With `nested`, the indexed field must be inside the named array. For text,
+each element becomes its own document for all queries and BM25 scoring.
+For all types, an `is_empty` condition on the field matches a point when an
+element lacks that field, and never a point without elements.
 
 ### `StopwordsSpec`
 
