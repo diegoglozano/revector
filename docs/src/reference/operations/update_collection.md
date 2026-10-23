@@ -23,6 +23,8 @@ up:
         memory: cold               # move the vector storage (Qdrant 1.19+)
     payload:
       memory: cold                 # move the payload store (Qdrant 1.19+)
+    id_tracker:
+      memory: cold                 # move the point ID mapping (Qdrant 1.20+)
 
 # update_collection is not auto-reversible (previous values aren't recorded).
 # Spell out the inverse explicitly:
@@ -42,8 +44,9 @@ down:
 | `optimizers_config` | [`OptimizersConfigSpec`](../specs.md#optimizersconfigspec) | no | Tune optimizer thresholds. |
 | `vectors` | map<name, [`VectorParamsDiff`](../specs.md#vectorparamsdiff)> | no | Patch params of existing named vectors (`on_disk`, `memory`, `hnsw_config`, `quantization_config`). |
 | `payload` | [`PayloadStorageSpec`](../specs.md#payloadstoragespec) | no | Move the payload storage between memory tiers (Qdrant 1.19+). |
+| `id_tracker` | [`IdTrackerSpec`](../specs.md#idtrackerspec) | no | Move the point ID mapping between memory tiers (Qdrant 1.20+). |
 
-At least one of those five fields must be set, otherwise revector refuses the
+At least one of those six fields must be set, otherwise revector refuses the
 op as a no-op.
 
 > **Note.** `size` and `distance` of a named vector are immutable. Per-vector

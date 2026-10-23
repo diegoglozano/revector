@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       qdrant_version:
-        description: "Qdrant server image tag to test against (e.g. latest, v1.19.0)"
+        description: "Qdrant server image tag to test against (e.g. latest, v1.20.0)"
         required: false
         default: "latest"
 

@@ -30,8 +30,12 @@ pub enum Datatype {
     Float32,
     Uint8,
     Float16,
-    /// TurboQuant 4-bit storage (Qdrant 1.19+).
+    /// TurboQuant 4-bit storage (Qdrant 1.18.2+).
     Turbo4,
+    /// TurboQuant 8-bit storage (Qdrant 1.20+).
+    Turbo8,
+    /// TurboQuant 16-bit storage (Qdrant 1.20+).
+    Turbo16,
 }
 
 /// Where a component's data is held in RAM (Qdrant 1.19+).
@@ -181,7 +185,7 @@ pub struct BinaryQuantizationSpec {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TurboquantQuantizationSpec {
-    /// Bits per component: `1`, `1.5`, `2`, or `4`. Omitted → server default.
+    /// Bits per component: `1`, `1.5`, `2`, `4`, or `8`. Omitted → server default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bits: Option<String>,
     /// Superseded by `memory`.
@@ -209,6 +213,21 @@ pub struct OptimizersConfigSpec {
     pub indexing_threshold: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flush_interval_sec: Option<u64>,
+}
+
+/// Memory placement of the point ID mapping in indexed segments (Qdrant 1.20+).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdTrackerSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Memory>,
+}
+
+/// Ranking configuration for a full-text index (Qdrant 1.20+).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TextScoringSpec {
+    Bm25 {},
 }
 
 /// Field types for payload indexes.
@@ -259,6 +278,8 @@ pub enum Tokenizer {
     Whitespace,
     Word,
     Multilingual,
+    /// Split code identifiers on underscores and case changes (Qdrant 1.20+).
+    Code,
 }
 
 /// Stopword configuration for a `text` payload index.
@@ -297,6 +318,13 @@ pub enum StemmerSpec {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadIndexParamsSpec {
+    /// Array path whose elements are indexed separately, e.g. `offers`
+    /// for `offers[].price` (Qdrant 1.20+). All types.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<String>,
+    /// Enable full-text ranking (Qdrant 1.20+). `text` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoring: Option<TextScoringSpec>,
     /// Store the index on disk. Superseded by `memory`. All types.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_disk: Option<bool>,
@@ -349,7 +377,7 @@ pub struct PayloadIndexParamsSpec {
 }
 
 /// Params every payload index type accepts.
-const COMMON_INDEX_PARAMS: &[&str] = &["on_disk", "memory", "enable_hnsw"];
+const COMMON_INDEX_PARAMS: &[&str] = &["on_disk", "memory", "enable_hnsw", "nested"];
 
 impl PayloadIndexParamsSpec {
     /// The params this spec actually sets, by YAML field name.
@@ -360,6 +388,8 @@ impl PayloadIndexParamsSpec {
                 set.push(name);
             }
         };
+        push("nested", self.nested.is_some());
+        push("scoring", self.scoring.is_some());
         push("on_disk", self.on_disk.is_some());
         push("memory", self.memory.is_some());
         push("enable_hnsw", self.enable_hnsw.is_some());
@@ -388,6 +418,7 @@ impl PayloadIndexParamsSpec {
             PayloadSchemaType::Float | PayloadSchemaType::Datetime => &["is_principal"],
             PayloadSchemaType::Geo | PayloadSchemaType::Bool => &[],
             PayloadSchemaType::Text => &[
+                "scoring",
                 "tokenizer",
                 "lowercase",
                 "min_token_len",
@@ -425,7 +456,7 @@ impl PayloadIndexParamsSpec {
         if schema == PayloadSchemaType::Text && self.tokenizer.is_none() {
             return Err(Error::InvalidOperation(
                 "a `text` payload index with `params` must set `tokenizer` \
-                 (prefix | whitespace | word | multilingual)"
+                 (prefix | whitespace | word | multilingual | code)"
                     .to_string(),
             ));
         }
@@ -469,6 +500,9 @@ pub struct CollectionSpec {
     /// Payload storage configuration (Qdrant 1.19+).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<PayloadStorageSpec>,
+    /// Memory placement of the point ID mapping (Qdrant 1.20+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_tracker: Option<IdTrackerSpec>,
 }
 
 // --- Minimum server version -------------------------------------------------
@@ -476,6 +510,24 @@ pub struct CollectionSpec {
 // Each spec reports the oldest Qdrant that understands the fields it sets, so
 // the runner can refuse before a newer-than-the-server setting is silently
 // dropped on the wire. See [`crate::version`] for why this matters.
+
+impl Datatype {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        let (version, name) = match self {
+            Datatype::Turbo4 => (version::TURBO4_DATATYPE, "turbo4"),
+            Datatype::Turbo8 => (version::QDRANT_1_20, "turbo8"),
+            Datatype::Turbo16 => (version::QDRANT_1_20, "turbo16"),
+            _ => return,
+        };
+        require(out, version, format!("`datatype: {name}` on {path}"));
+    }
+}
+
+impl IdTrackerSpec {
+    pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        require(out, version::QDRANT_1_20, format!("`{path}` block"));
+    }
+}
 
 impl VectorSpec {
     pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
@@ -486,12 +538,8 @@ impl VectorSpec {
                 format!("`memory` on {path}"),
             );
         }
-        if self.datatype == Some(Datatype::Turbo4) {
-            require(
-                out,
-                version::TURBO4_DATATYPE,
-                format!("`datatype: turbo4` on {path}"),
-            );
+        if let Some(datatype) = self.datatype {
+            datatype.version_requirements(path, out);
         }
         if let Some(h) = &self.hnsw_config {
             h.version_requirements(&format!("{path}.hnsw_config"), out);
@@ -528,6 +576,11 @@ impl SparseVectorSpec {
 
 impl QuantizationSpec {
     pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        if let QuantizationSpec::Turboquant(t) = self {
+            if t.bits.as_deref() == Some("8") {
+                require(out, version::QDRANT_1_20, format!("`bits: 8` on {path}"));
+            }
+        }
         let memory = match self {
             QuantizationSpec::Scalar(s) => s.memory,
             QuantizationSpec::Product(p) => p.memory,
@@ -554,6 +607,19 @@ impl PayloadStorageSpec {
 
 impl PayloadIndexParamsSpec {
     pub fn version_requirements(&self, path: &str, out: &mut Vec<VersionRequirement>) {
+        if self.nested.is_some() {
+            require(out, version::QDRANT_1_20, format!("`nested` on {path}"));
+        }
+        if self.scoring.is_some() {
+            require(out, version::QDRANT_1_20, format!("`scoring` on {path}"));
+        }
+        if self.tokenizer == Some(Tokenizer::Code) {
+            require(
+                out,
+                version::QDRANT_1_20,
+                format!("`tokenizer: code` on {path}"),
+            );
+        }
         if self.memory.is_some() {
             require(
                 out,
@@ -595,6 +661,9 @@ impl CollectionSpec {
         }
         if let Some(p) = &self.payload {
             p.version_requirements("payload", out);
+        }
+        if let Some(id) = &self.id_tracker {
+            id.version_requirements("id_tracker", out);
         }
     }
 }

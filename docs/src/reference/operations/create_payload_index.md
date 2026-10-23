@@ -1,6 +1,6 @@
 # `create_payload_index`
 
-Create an index on a payload field so it can be used in filters efficiently.
+Create an index on a payload field for efficient filtering or BM25 text ranking.
 
 ## Example
 
@@ -39,6 +39,23 @@ up:
       tokenizer: word         # required when a text index declares params
       lowercase: true
       stemmer: { snowball: english }
+
+  # Qdrant 1.20+: BM25 ranking without sparse embeddings.
+  - op: create_payload_index
+    collection: products
+    field_name: source_code
+    schema: text
+    params:
+      tokenizer: code
+      scoring: { type: bm25 }
+
+  # Qdrant 1.20+: index each array element for nested filters.
+  - op: create_payload_index
+    collection: products
+    field_name: offers[].price
+    schema: integer
+    params:
+      nested: offers
 ```
 
 ## Fields
@@ -54,6 +71,17 @@ Params are checked against `schema:` when the migration file is parsed: setting
 one the field type doesn't accept — `prefix` on an `integer` field, say — fails
 `revector validate` offline, rather than being quietly dropped on the way to
 the server.
+
+Creating an index is idempotent: an existing field index is skipped. To enable
+scoring or change the tokenizer on an existing index, add a new revision that
+first deletes the index and then recreates it with the new params. Supply the
+old schema and params on the delete so automatic rollback restores them.
+
+Applications can then query a BM25 index with Qdrant's Query API:
+
+```json
+{ "query": { "text": "user name" }, "using": "source_code" }
+```
 
 ## Reversibility
 

@@ -203,12 +203,13 @@ impl<'a> Executor<'a> {
             });
             touched = true;
         }
-        if let Some(payload) = &op.payload {
+        if op.payload.is_some() || op.id_tracker.is_some() {
             builder = builder.params(convert::collection_params_diff(
                 None,
                 None,
                 None,
-                Some(payload),
+                op.payload.as_ref(),
+                op.id_tracker.as_ref(),
             ));
             touched = true;
         }

@@ -32,6 +32,7 @@ specific Qdrant server line, kept in lockstep with the `qdrant-client` crate:
 
 | revector | `qdrant-client` crate | Qdrant server (tested) |
 |----------|-----------------------|------------------------|
+| 0.6.x    | 1.20                  | 1.20.x (CI runs `v1.20.0`) |
 | 0.5.x    | 1.19                  | 1.19.x (CI runs `v1.19.0`) |
 | 0.4.x    | 1.18                  | 1.18.x (CI runs `v1.18.2`) |
 
@@ -42,7 +43,8 @@ declares*, not the revector release:
 
 | Field | Minimum Qdrant server |
 |-------|----------------------|
-| `memory:` (any component), collection `payload:`, `params.prefix`, `params.stemmer: disabled` | 1.19.0 |
+| `params.scoring`, `params.tokenizer: code`, `params.nested`, `datatype: turbo8` / `turbo16`, TurboQuant `bits: "8"`, collection `id_tracker:` | 1.20.0 |
+| `memory:` (existing components), collection `payload:`, `params.prefix`, `params.stemmer: disabled` | 1.19.0 |
 | `datatype: turbo4` | 1.18.2 |
 | `create_vector` / `delete_vector` | 1.18.0 |
 | everything else | the version that introduced it |
@@ -63,6 +65,24 @@ first. Dependabot proposes the matching `qdrant-client` bump as its own PR. The
 pinned server version lives in `SUPPORTED_QDRANT_VERSION` (`tests/integration.rs`)
 and can be overridden with the `REVECTOR_QDRANT_VERSION` env var when running the
 tests locally.
+
+Qdrant 1.20 migrations can enable BM25 ranking directly on payload text:
+
+```yaml
+- op: create_payload_index
+  collection: code
+  field_name: body
+  schema: text
+  params:
+    tokenizer: code
+    scoring: { type: bm25 }
+```
+
+Revector creates the index; applications query it with Qdrant's text Query API.
+For an existing text index, delete and recreate it in a new revision to change
+its settings. See the [index reference](https://diegoglozano.github.io/revector/reference/operations/create_payload_index.html).
+When upgrading a server, follow Qdrant's [1.20 upgrade notes](https://qdrant.tech/blog/qdrant-1.20.x/#upgrading-to-version-120),
+including internal authentication and inline-storage memory changes.
 
 ## Install
 

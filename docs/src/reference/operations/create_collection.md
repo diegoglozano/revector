@@ -29,6 +29,8 @@ up:
       replication_factor: 2
       payload:
         memory: cold                 # payload storage tier (Qdrant 1.19+)
+      id_tracker:
+        memory: cold                 # point ID mapping (Qdrant 1.20+)
 ```
 
 ## Fields
@@ -52,6 +54,7 @@ up:
 | `write_consistency_factor` | uint | Write consistency factor. |
 | `on_disk_payload` | bool | Store the whole collection payload on disk. Superseded by `payload.memory`. |
 | `payload` | [`PayloadStorageSpec`](../specs.md#payloadstoragespec) | Payload storage configuration (Qdrant 1.19+). |
+| `id_tracker` | [`IdTrackerSpec`](../specs.md#idtrackerspec) | Point ID mapping placement (Qdrant 1.20+). |
 
 ## Reversibility
 

@@ -36,7 +36,7 @@ warns when a `create_vector` spec declares one of them.
 | `distance` | `Cosine` \| `Euclid` \| `Dot` \| `Manhattan` | Distance metric. Immutable. |
 | `on_disk` | bool | Ignored at create time — apply via `update_collection`. |
 | `memory` | [`Memory`](../specs.md#memory) | Ignored at create time — apply via `update_collection`. |
-| `datatype` | `float32` \| `uint8` \| `float16` \| `turbo4` | Element storage type (`turbo4` needs Qdrant 1.19+). |
+| `datatype` | `float32` \| `uint8` \| `float16` \| `turbo4` \| `turbo8` \| `turbo16` | Element storage type (`turbo4` needs Qdrant 1.18.2+; `turbo8` / `turbo16` need 1.20+). |
 | `hnsw_config` | [`HnswConfigSpec`](../specs.md#hnswconfigspec) | Ignored at create time — apply via `update_collection`. |
 | `quantization_config` | [`QuantizationSpec`](../specs.md#quantizationspec) | Ignored at create time — apply via `update_collection`. |
 

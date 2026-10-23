@@ -494,8 +494,13 @@ up:
                 op.vectors.as_ref().unwrap().get("").unwrap(),
             );
             assert_eq!(diff.memory, Some(QMemory::Cached as i32));
-            let params =
-                revector::convert::collection_params_diff(None, None, None, op.payload.as_ref());
+            let params = revector::convert::collection_params_diff(
+                None,
+                None,
+                None,
+                op.payload.as_ref(),
+                None,
+            );
             assert_eq!(
                 params.payload.and_then(|p| p.memory),
                 Some(QMemory::Cold as i32)
@@ -826,4 +831,229 @@ up:
     assert_eq!(reqs.len(), 2, "{reqs:?}");
     assert!(reqs.iter().any(|(_, f)| f.contains("vectors.image")));
     assert!(reqs.iter().any(|(_, f)| f.contains("payload")));
+}
+
+// --- Qdrant 1.20 ------------------------------------------------------------
+
+#[test]
+fn text_scoring_and_code_tokenizer_round_trip() {
+    use qdrant_client::qdrant::{
+        payload_index_params::IndexParams, TextScoringType, TokenizerType,
+    };
+    use revector::spec::PayloadSchemaType;
+
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: create_payload_index
+    collection: code
+    field_name: files[].body
+    schema: text
+    params:
+      tokenizer: code
+      scoring: { type: bm25 }
+      nested: files
+"#);
+    let Operation::CreatePayloadIndex { params, .. } = &m.file.up[0] else {
+        panic!("expected index");
+    };
+    let IndexParams::TextIndexParams(text) =
+        revector::convert::payload_index_params(PayloadSchemaType::Text, params.as_ref().unwrap())
+    else {
+        panic!("expected text params")
+    };
+    assert_eq!(text.tokenizer, TokenizerType::Code as i32);
+    assert_eq!(text.scoring.unwrap().r#type, TextScoringType::Bm25 as i32);
+    assert_eq!(text.nested.as_deref(), Some("files"));
+    let reqs = up_requirements(&m);
+    assert_eq!(reqs.len(), 3);
+    assert!(reqs.iter().all(|(v, _)| v == "1.20.0"));
+    let down = m.downgrade_ops().unwrap();
+    assert!(down[0].version_requirements().is_empty());
+    let Reversibility::Auto(restored) = down[0].auto_inverse() else {
+        panic!("expected reversible index");
+    };
+    assert_eq!(*restored, m.file.up[0]);
+    let yaml = serde_yaml::to_string(&m.file).unwrap();
+    assert_eq!(
+        serde_yaml::from_str::<MigrationFile>(&yaml).unwrap().up,
+        m.file.up
+    );
+}
+
+#[test]
+fn nested_params_reach_every_index_type_and_scoring_is_text_only() {
+    use qdrant_client::qdrant::payload_index_params::IndexParams;
+    use revector::spec::{
+        PayloadIndexParamsSpec, PayloadSchemaType as S, TextScoringSpec, Tokenizer,
+    };
+
+    for schema in [
+        S::Keyword,
+        S::Integer,
+        S::Float,
+        S::Geo,
+        S::Text,
+        S::Bool,
+        S::Datetime,
+        S::Uuid,
+    ] {
+        let params = PayloadIndexParamsSpec {
+            nested: Some("offers".into()),
+            tokenizer: (schema == S::Text).then_some(Tokenizer::Word),
+            ..Default::default()
+        };
+        params.validate_for(schema).unwrap();
+        let nested = match revector::convert::payload_index_params(schema, &params) {
+            IndexParams::KeywordIndexParams(p) => p.nested,
+            IndexParams::IntegerIndexParams(p) => p.nested,
+            IndexParams::FloatIndexParams(p) => p.nested,
+            IndexParams::GeoIndexParams(p) => p.nested,
+            IndexParams::TextIndexParams(p) => p.nested,
+            IndexParams::BoolIndexParams(p) => p.nested,
+            IndexParams::DatetimeIndexParams(p) => p.nested,
+            IndexParams::UuidIndexParams(p) => p.nested,
+        };
+        assert_eq!(nested.as_deref(), Some("offers"));
+        if schema != S::Text {
+            let invalid = PayloadIndexParamsSpec {
+                scoring: Some(TextScoringSpec::Bm25 {}),
+                ..Default::default()
+            };
+            assert!(invalid
+                .validate_for(schema)
+                .unwrap_err()
+                .to_string()
+                .contains("scoring"));
+        }
+    }
+    // Unknown ranking types and options must fail offline.
+    for yaml in ["type: typo", "type: bm25\nk: 1.2"] {
+        assert!(serde_yaml::from_str::<TextScoringSpec>(yaml).is_err());
+    }
+}
+
+#[test]
+fn turbo8_and_turbo16_require_1_20_on_collection_and_add_vector() {
+    use qdrant_client::qdrant::Datatype;
+    for (name, expected) in [("turbo8", Datatype::Turbo8), ("turbo16", Datatype::Turbo16)] {
+        let m = mig(&format!(
+            r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: create_collection
+    name: docs
+    spec:
+      vectors:
+        text:
+          size: 8
+          distance: Cosine
+          datatype: {name}
+  - op: create_vector
+    collection: docs
+    name: extra
+    spec:
+      size: 8
+      distance: Cosine
+      datatype: {name}
+      quantization_config:
+        turboquant: {{ bits: "8" }}
+"#
+        ));
+        let vector = &first_create_spec(&m).vectors["text"];
+        assert_eq!(
+            revector::convert::vector_params(vector).datatype,
+            Some(expected as i32)
+        );
+        // The quantization on create_vector is dropped, so only its datatype counts.
+        let reqs = up_requirements(&m);
+        assert_eq!(reqs.len(), 2, "{reqs:?}");
+        assert!(reqs.iter().all(|(v, f)| v == "1.20.0" && f.contains(name)));
+    }
+}
+
+#[test]
+fn turboquant_eight_bits_requires_1_20_everywhere_it_is_sent() {
+    use qdrant_client::qdrant::{quantization_config::Quantization, TurboQuantBitSize};
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: create_collection
+    name: docs
+    spec:
+      vectors:
+        text:
+          size: 8
+          distance: Cosine
+          quantization_config:
+            turboquant: { bits: "8" }
+      quantization_config:
+        turboquant: { bits: "8" }
+  - op: update_collection
+    collection: docs
+    quantization_config:
+      turboquant: { bits: "8" }
+    vectors:
+      text:
+        quantization_config:
+          turboquant: { bits: "8" }
+"#);
+    let spec = first_create_spec(&m);
+    let Quantization::Turboquant(t) =
+        revector::convert::quantization_oneof(spec.quantization_config.as_ref().unwrap()).unwrap()
+    else {
+        panic!("expected TurboQuant")
+    };
+    assert_eq!(t.bits, Some(TurboQuantBitSize::Bits8 as i32));
+    let reqs = up_requirements(&m);
+    assert_eq!(reqs.len(), 4);
+    assert!(reqs
+        .iter()
+        .all(|(v, f)| v == "1.20.0" && f.contains("bits: 8")));
+}
+
+#[test]
+fn id_tracker_create_and_update_require_1_20_even_for_an_empty_block() {
+    use qdrant_client::qdrant::{CreateCollection, CreateCollectionBuilder, Memory};
+    let m = mig(r#"
+revision: "0001"
+down_revision: null
+up:
+  - op: create_collection
+    name: docs
+    spec:
+      id_tracker: { memory: cold }
+  - op: update_collection
+    collection: docs
+    id_tracker: { memory: cached }
+  - op: update_collection
+    collection: docs
+    id_tracker: {}
+"#);
+    let request: CreateCollection = revector::convert::apply_collection_spec(
+        CreateCollectionBuilder::new("docs"),
+        first_create_spec(&m),
+    )
+    .build();
+    assert_eq!(
+        request.id_tracker.unwrap().memory,
+        Some(Memory::Cold as i32)
+    );
+    let Operation::UpdateCollection(op) = &m.file.up[1] else {
+        panic!("expected update")
+    };
+    let params =
+        revector::convert::collection_params_diff(None, None, None, None, op.id_tracker.as_ref());
+    assert_eq!(
+        params.id_tracker.unwrap().memory,
+        Some(Memory::Cached as i32)
+    );
+    let reqs = up_requirements(&m);
+    assert_eq!(reqs.len(), 3);
+    assert!(reqs
+        .iter()
+        .all(|(v, f)| v == "1.20.0" && f.contains("id_tracker")));
 }

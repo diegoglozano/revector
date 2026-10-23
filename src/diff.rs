@@ -178,6 +178,22 @@ fn diff_vector(
         live.memory,
     );
 
+    if let Some(datatype) = declared.datatype {
+        let expected = qdrant_client::qdrant::Datatype::from(datatype);
+        let actual = live
+            .datatype
+            .unwrap_or(qdrant_client::qdrant::Datatype::Float32 as i32);
+        if expected as i32 != actual {
+            diffs.push(Difference {
+                path: format!("{prefix}.datatype"),
+                declared: format!("{datatype:?}"),
+                live: qdrant_client::qdrant::Datatype::try_from(actual)
+                    .map(|d| format!("{d:?}"))
+                    .unwrap_or_else(|_| actual.to_string()),
+            });
+        }
+    }
+
     if let Some(h) = &declared.hnsw_config {
         diff_hnsw(
             diffs,
@@ -321,6 +337,14 @@ pub async fn diff_collection(
             "payload.memory",
             p.memory,
             params.payload.as_ref().and_then(|l| l.memory),
+        );
+    }
+    if let Some(id) = &spec.id_tracker {
+        cmp_memory(
+            &mut diffs,
+            "id_tracker.memory",
+            id.memory,
+            params.id_tracker.as_ref().and_then(|l| l.memory),
         );
     }
     cmp(

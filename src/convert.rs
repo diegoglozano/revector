@@ -20,9 +20,10 @@ use qdrant_client::qdrant::{
 use qdrant_client::qdrant::payload_index_params::IndexParams as QIndexParams;
 
 use crate::spec::{
-    CollectionSpec, Datatype, Distance, HnswConfigSpec, Memory, OptimizersConfigSpec,
-    PayloadIndexParamsSpec, PayloadSchemaType, PayloadStorageSpec, QuantizationSpec,
-    SparseVectorSpec, StemmerSpec, StopwordsSpec, Tokenizer, VectorSpec,
+    CollectionSpec, Datatype, Distance, HnswConfigSpec, IdTrackerSpec, Memory,
+    OptimizersConfigSpec, PayloadIndexParamsSpec, PayloadSchemaType, PayloadStorageSpec,
+    QuantizationSpec, SparseVectorSpec, StemmerSpec, StopwordsSpec, TextScoringSpec, Tokenizer,
+    VectorSpec,
 };
 
 impl From<Distance> for QDistance {
@@ -43,6 +44,8 @@ impl From<Datatype> for QDatatype {
             Datatype::Uint8 => QDatatype::Uint8,
             Datatype::Float16 => QDatatype::Float16,
             Datatype::Turbo4 => QDatatype::Turbo4,
+            Datatype::Turbo8 => QDatatype::Turbo8,
+            Datatype::Turbo16 => QDatatype::Turbo16,
         }
     }
 }
@@ -70,6 +73,7 @@ impl From<Tokenizer> for TokenizerType {
             Tokenizer::Whitespace => TokenizerType::Whitespace,
             Tokenizer::Word => TokenizerType::Word,
             Tokenizer::Multilingual => TokenizerType::Multilingual,
+            Tokenizer::Code => TokenizerType::Code,
         }
     }
 }
@@ -172,6 +176,7 @@ fn turbo_quant_bits(s: &str) -> Option<i32> {
         "1.5" | "1_5" => Some(qdrant::TurboQuantBitSize::Bits15 as i32),
         "2" => Some(qdrant::TurboQuantBitSize::Bits2 as i32),
         "4" => Some(qdrant::TurboQuantBitSize::Bits4 as i32),
+        "8" => Some(qdrant::TurboQuantBitSize::Bits8 as i32),
         _ => None,
     }
 }
@@ -374,7 +379,17 @@ pub fn apply_collection_spec(
     if let Some(p) = &spec.payload {
         builder = builder.payload(payload_storage_params(p));
     }
+    if let Some(id) = &spec.id_tracker {
+        builder = builder.id_tracker(id_tracker_params(id));
+    }
     builder
+}
+
+/// Convert point ID tracker placement into proto parameters (Qdrant 1.20+).
+pub fn id_tracker_params(id: &IdTrackerSpec) -> qdrant::IdTrackerParams {
+    qdrant::IdTrackerParams {
+        memory: memory(id.memory),
+    }
 }
 
 /// Convert a [`PayloadStorageSpec`] into proto [`PayloadStorageParams`]
@@ -386,19 +401,21 @@ pub fn payload_storage_params(p: &PayloadStorageSpec) -> PayloadStorageParams {
 }
 
 /// Build a [`CollectionParamsDiff`] from the patchable fields of a spec
-/// (replication / write-consistency / payload storage).
+/// (replication / write-consistency / payload storage / ID tracker).
 #[allow(deprecated)] // `on_disk_payload`: see the note on `HnswConfigDiff::from`.
 pub fn collection_params_diff(
     replication_factor: Option<u32>,
     write_consistency_factor: Option<u32>,
     on_disk_payload: Option<bool>,
     payload: Option<&PayloadStorageSpec>,
+    id_tracker: Option<&IdTrackerSpec>,
 ) -> CollectionParamsDiff {
     CollectionParamsDiff {
         replication_factor,
         write_consistency_factor,
         on_disk_payload,
         payload: payload.map(payload_storage_params),
+        id_tracker: id_tracker.map(id_tracker_params),
         ..Default::default()
     }
 }
@@ -424,6 +441,7 @@ pub fn payload_index_params(schema: PayloadSchemaType, p: &PayloadIndexParamsSpe
                 // `prefix: false` means "leave it off", not "send an empty one".
                 prefix: p.prefix.unwrap_or(false).then_some(KeywordPrefixParams {}),
                 memory,
+                nested: p.nested.clone(),
             })
         }
         PayloadSchemaType::Integer => QIndexParams::IntegerIndexParams(IntegerIndexParams {
@@ -433,17 +451,20 @@ pub fn payload_index_params(schema: PayloadSchemaType, p: &PayloadIndexParamsSpe
             on_disk,
             enable_hnsw,
             memory,
+            nested: p.nested.clone(),
         }),
         PayloadSchemaType::Float => QIndexParams::FloatIndexParams(FloatIndexParams {
             on_disk,
             is_principal: p.is_principal,
             enable_hnsw,
             memory,
+            nested: p.nested.clone(),
         }),
         PayloadSchemaType::Geo => QIndexParams::GeoIndexParams(GeoIndexParams {
             on_disk,
             enable_hnsw,
             memory,
+            nested: p.nested.clone(),
         }),
         PayloadSchemaType::Text => {
             QIndexParams::TextIndexParams(TextIndexParams {
@@ -460,26 +481,35 @@ pub fn payload_index_params(schema: PayloadSchemaType, p: &PayloadIndexParamsSpe
                 phrase_matching: p.phrase_matching,
                 stemmer: p.stemmer.as_ref().map(StemmingAlgorithm::from),
                 ascii_folding: p.ascii_folding,
+                scoring: p.scoring.as_ref().map(|s| qdrant::TextScoringParams {
+                    r#type: match s {
+                        TextScoringSpec::Bm25 {} => qdrant::TextScoringType::Bm25 as i32,
+                    },
+                }),
                 enable_hnsw,
                 memory,
+                nested: p.nested.clone(),
             })
         }
         PayloadSchemaType::Bool => QIndexParams::BoolIndexParams(BoolIndexParams {
             on_disk,
             enable_hnsw,
             memory,
+            nested: p.nested.clone(),
         }),
         PayloadSchemaType::Datetime => QIndexParams::DatetimeIndexParams(DatetimeIndexParams {
             on_disk,
             is_principal: p.is_principal,
             enable_hnsw,
             memory,
+            nested: p.nested.clone(),
         }),
         PayloadSchemaType::Uuid => QIndexParams::UuidIndexParams(UuidIndexParams {
             is_tenant: p.is_tenant,
             on_disk,
             enable_hnsw,
             memory,
+            nested: p.nested.clone(),
         }),
     }
 }
