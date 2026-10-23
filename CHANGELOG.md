@@ -24,6 +24,8 @@ All notable changes to revector are documented here. The format is based on
 - `diff` now checks explicitly declared vector datatypes.
 
 ### Security
+- Update locked `rustls-webpki` and `webpki-root-certs` dependencies to address
+  RUSTSEC-2026-0382 and RUSTSEC-2026-0383.
 - Update the locked `rustls` dependency to 0.23.46 to address
   RUSTSEC-2026-0346, RUSTSEC-2026-0347, RUSTSEC-2026-0348, and RUSTSEC-2026-0349.
 
